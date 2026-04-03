@@ -14,6 +14,7 @@ export interface AppConfig {
     mqttHost?: string;
     mqttPort?: string;
     deviceSettings?: Record<string, { name: string; iconType: string; customIconUri?: string }>;
+    customDevices?: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string }[];
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -94,6 +95,17 @@ export const Storage = {
                 ...(config.deviceSettings || {}),
                 [deviceId]: settings,
             },
+        };
+        await this.saveConfig(updatedConfig);
+    },
+
+    async saveCustomDevices(devices: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string }[]): Promise<void> {
+        const config = await this.loadConfig();
+        if (!config) return;
+
+        const updatedConfig = {
+            ...config,
+            customDevices: devices,
         };
         await this.saveConfig(updatedConfig);
     }

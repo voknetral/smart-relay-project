@@ -1,7 +1,6 @@
 import { SmartHomeColors } from '@/constants/theme';
 import { TXT } from '@/constants/translations';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import React from 'react';
 import {
     Modal,
@@ -47,7 +46,7 @@ export function NotificationModal({
             statusBarTranslucent={true}
             onRequestClose={onClose}
         >
-            <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
+            <View style={styles.modalOverlay}>
                 <View style={[styles.modalContainer, { paddingTop: insets.top + 8, paddingBottom: insets.bottom }]}>
                     <View style={styles.header}>
                         <TouchableOpacity onPress={onClose} style={styles.headerBackBtn}>
@@ -92,7 +91,7 @@ export function NotificationModal({
                         </TouchableOpacity>
                     )}
                 </View>
-            </BlurView>
+            </View>
         </Modal>
     );
 }

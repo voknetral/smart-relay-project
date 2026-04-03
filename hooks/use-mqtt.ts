@@ -41,8 +41,8 @@ export function useMqtt(
         try {
             const client = mqtt.connect(brokerUrl, {
                 clientId,
-                clean: false, // Maintain state across reconnects
-                connectTimeout: 10000, // Longer timeout for spotty networks
+                clean: true, // MUST be true for randomly generated Client IDs on public brokers
+                connectTimeout: 15000, // Longer timeout for spotty networks
                 reconnectPeriod: 2000, // Wait 2s before reconnecting
                 keepalive: 60, // Ping broker every 60s
                 resubscribe: true, // Auto-resubscribe after reconnect

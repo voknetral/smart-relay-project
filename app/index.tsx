@@ -19,6 +19,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -40,6 +42,7 @@ interface Device {
   schedules?: Schedule[];
   mode: 'auto' | 'manual';
   customIconUri?: string;
+  isSynced?: boolean;
 }
 
 const INITIAL_DEVICES: Device[] = [
@@ -52,6 +55,7 @@ const INITIAL_DEVICES: Device[] = [
     isOn: false,
     schedules: [],
     mode: 'auto',
+    isSynced: false,
   },
   {
     id: '2',
@@ -62,6 +66,7 @@ const INITIAL_DEVICES: Device[] = [
     isOn: false,
     schedules: [],
     mode: 'auto',
+    isSynced: false,
   },
   {
     id: '3',
@@ -72,6 +77,7 @@ const INITIAL_DEVICES: Device[] = [
     isOn: false,
     schedules: [],
     mode: 'auto',
+    isSynced: false,
   },
   {
     id: '4',
@@ -82,26 +88,7 @@ const INITIAL_DEVICES: Device[] = [
     isOn: false,
     schedules: [],
     mode: 'auto',
-  },
-  {
-    id: '5',
-    name: 'Air Conditioner',
-    iconType: 'ac',
-    accentColor: SmartHomeColors.blue,
-    accentColorLight: '#3B82F622',
-    isOn: false,
-    schedules: [],
-    mode: 'auto',
-  },
-  {
-    id: '6',
-    name: 'Bedside Lamp',
-    iconType: 'light',
-    accentColor: SmartHomeColors.purple,
-    accentColorLight: '#8B5CF622',
-    isOn: false,
-    schedules: [],
-    mode: 'auto',
+    isSynced: false,
   },
 ];
 
@@ -138,8 +125,19 @@ export default function HomeScreen() {
         if (savedConfig) {
           setConfig(savedConfig);
 
-          // Apply custom device settings if they exist
-          if (savedConfig.deviceSettings) {
+          if (savedConfig.customDevices && savedConfig.customDevices.length > 0) {
+            setDevices(savedConfig.customDevices.map(c => ({
+              id: c.id,
+              name: c.name,
+              iconType: c.iconType as any,
+              customIconUri: c.customIconUri,
+              accentColor: c.accentColor || SmartHomeColors.purple,
+              isOn: false,
+              schedules: [],
+              mode: 'auto',
+              isSynced: false,
+            })));
+          } else if (savedConfig.deviceSettings) {
             setDevices(prev => prev.map(d => {
               const settings = savedConfig.deviceSettings?.[d.id];
               if (settings) {
@@ -261,14 +259,15 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!mqttConnected) {
       setIsDeviceOnline(false);
+      setDevices(prev => prev.map(d => ({ ...d, isSynced: false })));
     }
   }, [mqttConnected]);
 
   useEffect(() => {
     if (mqttConnected) {
       const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
-      // Subscribe to all device state topics ONLY ONCE
-      INITIAL_DEVICES.forEach((device) => {
+      // Subscribe to all device state topics
+      devices.forEach((device) => {
         subscribe(`${baseTopic}/${device.id}/state`);
         subscribe(`${baseTopic}/${device.id}/mode/state`);
       });
@@ -277,7 +276,11 @@ export default function HomeScreen() {
       onMessage((topic, message) => {
         const msgStr = message.toString();
         if (topic.endsWith('/availability')) {
-          setIsDeviceOnline(msgStr === 'online');
+          const online = msgStr === 'online';
+          setIsDeviceOnline(online);
+          if (!online) {
+            setDevices(prev => prev.map(d => ({ ...d, isSynced: false })));
+          }
           return;
         }
 
@@ -291,8 +294,8 @@ export default function HomeScreen() {
           const newState = msgStr === 'ON';
           setDevices((prev) =>
             prev.map((d) => {
-              if (d.id === deviceId && d.isOn !== newState) {
-                return { ...d, isOn: newState };
+              if (d.id === deviceId && (d.isOn !== newState || !d.isSynced)) {
+                return { ...d, isOn: newState, isSynced: true };
               }
               return d;
             }),
@@ -301,8 +304,8 @@ export default function HomeScreen() {
           const newMode = msgStr as 'auto' | 'manual';
           setDevices((prev) =>
             prev.map((d) => {
-              if (d.id === deviceId && d.mode !== newMode) {
-                return { ...d, mode: newMode };
+              if (d.id === deviceId && (d.mode !== newMode || !d.isSynced)) {
+                return { ...d, mode: newMode, isSynced: true };
               }
               return d;
             }),
@@ -367,16 +370,99 @@ export default function HomeScreen() {
   }, [mqttConnected, publish, config?.mqttTopic]);
 
   const handleUpdateDevice = async (id: string, name: string, iconType: DeviceIconName, customIconUri?: string) => {
+    // Optimistic state
     setDevices(prev => prev.map(d => d.id === id ? { ...d, name, iconType, customIconUri } : d));
-    await Storage.saveDeviceSettings(id, { name, iconType, customIconUri });
+    
+    // Convert current devices state into saveable array, updating the target ID
+    setDevices(currentDevices => {
+       const mapped = currentDevices.map(d => ({
+           id: d.id,
+           name: d.name,
+           iconType: d.iconType,
+           customIconUri: d.customIconUri,
+           accentColor: d.accentColor
+       }));
+       Storage.saveCustomDevices(mapped);
+       return currentDevices;
+    });
+  };
+
+  const handleAddDevice = () => {
+    const maxId = devices.reduce((max, d) => {
+      const num = parseInt(d.id, 10);
+      return !isNaN(num) && num > max ? num : max;
+    }, 0);
+    const newId = String(maxId + 1);
+
+    const newDevice: Device = {
+      id: newId,
+      name: `Perangkat ${newId}`,
+      iconType: 'plug',
+      accentColor: SmartHomeColors.purple,
+      isOn: false,
+      schedules: [],
+      mode: 'auto',
+      isSynced: false,
+    };
+
+    setDevices(prev => {
+      const newDevices = [...prev, newDevice];
+      const mapped = newDevices.map(d => ({
+         id: d.id,
+         name: d.name,
+         iconType: d.iconType,
+         customIconUri: d.customIconUri,
+         accentColor: d.accentColor
+      }));
+      Storage.saveCustomDevices(mapped);
+      return newDevices;
+    });
+
+    if (mqttConnected) {
+      const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
+      subscribe(`${baseTopic}/${newId}/state`);
+      subscribe(`${baseTopic}/${newId}/mode/state`);
+    }
+
+    setEditingDeviceId(newId);
+  };
+
+  const handleDeleteDevice = (id: string) => {
+    const proceed = () => {
+      setDevices(prev => {
+        const newDevices = prev.filter(d => d.id !== id);
+        const mapped = newDevices.map(d => ({
+           id: d.id,
+           name: d.name,
+           iconType: d.iconType,
+           customIconUri: d.customIconUri,
+           accentColor: d.accentColor
+        }));
+        Storage.saveCustomDevices(mapped);
+        return newDevices;
+      });
+      setEditingDeviceId(null);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm("Yakin ingin menghapus perangkat ini?")) proceed();
+    } else {
+      Alert.alert("Hapus Perangkat", "Tindakan ini tidak bisa dibatalkan.", [
+        { text: "Batal", style: "cancel" },
+        { text: "Hapus", style: "destructive", onPress: proceed }
+      ]);
+    }
   };
 
   const scheduledDevice = devices.find((d) => d.id === scheduledDeviceId);
   const editingDevice = devices.find((d) => d.id === editingDeviceId);
 
-  const contentStyle = isWide
-    ? { width: 420, alignSelf: 'center' as const }
-    : {};
+  const getCellWidth = () => {
+    const availableWidth = Math.min(width, 1200) - 40; // 40 is total horizontal padding
+    if (width > 1024) return (availableWidth - (3 * 16)) / 4; // 4 columns
+    if (width > 700) return (availableWidth - (2 * 16)) / 3;  // 3 columns
+    return (availableWidth - 16) / 2;                         // 2 columns
+  };
 
   if (!isReady) return <LoadingScreen />;
 
@@ -396,12 +482,13 @@ export default function HomeScreen() {
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 20 },
+            { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 20 },
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Header ────────────────────────────────────────────── */}
-          <View style={styles.header}>
+          <View style={styles.webContainer}>
+            {/* Header ────────────────────────────────────────────── */}
+            <View style={styles.header}>
             <View style={styles.headerTop}>
               <Text style={styles.headerTitle}>{TXT.common.smartHome}</Text>
               <View style={styles.headerIcons}>
@@ -475,7 +562,7 @@ export default function HomeScreen() {
           {/* Device Grid ───────────────────────────────────────── */}
           <View style={styles.deviceGrid}>
             {devices.map((device) => (
-              <View key={device.id} style={styles.deviceCell}>
+              <View key={device.id} style={[styles.deviceCell, { width: getCellWidth() }]}>
                 <DeviceCard
                   key={device.id}
                   name={device.name}
@@ -490,9 +577,18 @@ export default function HomeScreen() {
                   hasSchedules={device.schedules?.some(s => s.isEnabled)}
                   onLongPress={() => setEditingDeviceId(device.id)}
                   customIconUri={device.customIconUri}
+                  isMcuOnline={isDeviceOnline && device.isSynced !== false}
                 />
               </View>
             ))}
+            <TouchableOpacity 
+               style={[styles.addDeviceCard, { width: getCellWidth() }]} 
+               onPress={handleAddDevice}
+               activeOpacity={0.7}
+            >
+               <Ionicons name="add" size={32} color={SmartHomeColors.purple} />
+               <Text style={styles.addDeviceText}>Tambah Perangkat</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Modals ──────────────────────────────────────────────── */}
@@ -504,6 +600,7 @@ export default function HomeScreen() {
               deviceIcon={editingDevice.iconType}
               customIconUri={editingDevice.customIconUri}
               onSave={(name, icon, customIcon) => handleUpdateDevice(editingDevice.id, name, icon, customIcon)}
+              onDelete={() => handleDeleteDevice(editingDevice.id)}
             />
           )}
 
@@ -536,7 +633,7 @@ export default function HomeScreen() {
             <Text style={styles.attributionText}>{TXT.home.poweredBy}</Text>
           </View>
 
-          <View style={{ height: 32 }} />
+          </View>
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
@@ -547,7 +644,13 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, gap: 14 },
+  scrollContent: { paddingHorizontal: 20 },
+  webContainer: {
+    maxWidth: 1200,
+    width: '100%',
+    alignSelf: 'center',
+    gap: 14,
+  },
 
   // Merged weather card wrapper
   weatherMergedCard: {
@@ -626,10 +729,7 @@ const styles = StyleSheet.create({
     backgroundColor: SmartHomeColors.cardBg,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
+    boxShadow: '0 4px 10px rgba(139, 92, 246, 0.1)',
     elevation: 3,
   },
   notifDot: {
@@ -695,12 +795,30 @@ const styles = StyleSheet.create({
   deviceGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    gap: 16,
     marginTop: 4,
   },
   deviceCell: {
-    width: '48.5%', // Slightly adjusted for better gap symmetry
     marginBottom: 14,
+  },
+  addDeviceCard: {
+    marginBottom: 14,
+    backgroundColor: 'rgba(139, 92, 246, 0.05)',
+    borderRadius: 22,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 185,
+  },
+  addDeviceText: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '700',
+    color: SmartHomeColors.purple,
+    textAlign: 'center',
   },
 
   // Attribution

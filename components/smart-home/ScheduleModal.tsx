@@ -2,7 +2,6 @@ import { SmartHomeColors } from '@/constants/theme';
 import { TXT } from '@/constants/translations';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { BlurView } from 'expo-blur';
 import React, { useState } from 'react';
 import {
     Modal,
@@ -12,7 +11,9 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    Platform,
+    Alert
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,6 +32,22 @@ interface ScheduleModalProps {
     schedules: Schedule[];
     onUpdateSchedules: (schedules: Schedule[]) => void;
 }
+
+const checkOverlap = (s1: string, e1: string, s2: string, e2: string) => {
+    const toMins = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+    const mS1 = toMins(s1), mE1 = toMins(e1), mS2 = toMins(s2), mE2 = toMins(e2);
+    
+    // Jika melewati tengah malam (misal 23:00 ke 01:00), pecah jadi 2 segmen: [23:00 - 24:00] dan [00:00 - 01:00]
+    const segs1 = mS1 < mE1 ? [[mS1, mE1]] : [[mS1, 1440], [0, mE1]];
+    const segs2 = mS2 < mE2 ? [[mS2, mE2]] : [[mS2, 1440], [0, mE2]];
+    
+    for (const [a1, b1] of segs1) {
+        for (const [a2, b2] of segs2) {
+            if (Math.max(a1, a2) < Math.min(b1, b2)) return true; // Tabrakan rentang waktu!
+        }
+    }
+    return false;
+};
 
 export function ScheduleModal({
     visible,
@@ -67,12 +84,34 @@ export function ScheduleModal({
 
     const addSchedule = () => {
         const timeStr = (d: Date) => `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+        const startStr = timeStr(startDateTime);
+        const endStr = timeStr(endDateTime);
+
+        if (startStr === endStr) {
+            const msg = "Waktu nyala (Start) dan mati (End) tidak boleh sama persis.";
+            if (Platform.OS === 'web') window.alert(msg); else Alert.alert("Waktu Tidak Valid", msg);
+            return;
+        }
+
+        const conflict = schedules.find(s => {
+            if (s.id === editingScheduleId) return false;
+            // Abaikan jadwal yang sedang dalam keadaan mati (disabled) saat mengecek bentrokan
+            if (!s.isEnabled) return false;
+            return checkOverlap(startStr, endStr, s.startTime, s.endTime);
+        });
+
+        if (conflict) {
+            const conflictName = conflict.name || 'Jadwal Lain';
+            const msg = `Waktu bentrok dengan "${conflictName}".\nTidak boleh ada waktu nyala/mati yang bersinggungan di jadwal yang sama.`;
+            if (Platform.OS === 'web') window.alert(msg); else Alert.alert("Jadwal Bentrok", msg);
+            return;
+        }
 
         if (editingScheduleId) {
             onUpdateSchedules(
                 schedules.map((s) =>
                     s.id === editingScheduleId
-                        ? { ...s, name: name.trim() || undefined, startTime: timeStr(startDateTime), endTime: timeStr(endDateTime) }
+                        ? { ...s, name: name.trim() || undefined, startTime: startStr, endTime: endStr }
                         : s
                 )
             );
@@ -81,8 +120,8 @@ export function ScheduleModal({
             const newSched: Schedule = {
                 id: Math.random().toString(36).substr(2, 9),
                 name: name.trim() || undefined,
-                startTime: timeStr(startDateTime),
-                endTime: timeStr(endDateTime),
+                startTime: startStr,
+                endTime: endStr,
                 isEnabled: true,
             };
             onUpdateSchedules([...schedules, newSched]);
@@ -114,6 +153,24 @@ export function ScheduleModal({
     };
 
     const toggleSchedule = (id: string) => {
+        const target = schedules.find(s => s.id === id);
+        if (!target) return;
+
+        // Jika akan diaktifkan dari mati ke nyala, pastikan tidak bentrok dengan jadwal aktif lain
+        if (!target.isEnabled) {
+            const conflict = schedules.find(s => {
+                if (s.id === id) return false;
+                if (!s.isEnabled) return false;
+                return checkOverlap(target.startTime, target.endTime, s.startTime, s.endTime);
+            });
+
+            if (conflict) {
+                const msg = `Gagal mengaktifkan jadwal.\nWaktunya bentrok dengan jadwal aktif lain: "${conflict.name || 'Jadwal Lain'}".`;
+                if (Platform.OS === 'web') window.alert(msg); else Alert.alert("Tabrakan Jadwal", msg);
+                return;
+            }
+        }
+
         onUpdateSchedules(
             schedules.map((s) =>
                 s.id === id ? { ...s, isEnabled: !s.isEnabled } : s
@@ -129,7 +186,7 @@ export function ScheduleModal({
             statusBarTranslucent={true}
             onRequestClose={onClose}
         >
-            <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
+            <View style={styles.modalOverlay}>
                 <View style={[styles.modalContainer, { paddingTop: insets.top + 8, paddingBottom: insets.bottom }]}>
                     <View style={styles.header}>
                         <TouchableOpacity onPress={onClose} style={styles.headerBackBtn}>
@@ -229,7 +286,7 @@ export function ScheduleModal({
                         </TouchableOpacity>
                     </View>
                 </View>
-            </BlurView>
+            </View>
 
             {showStartPicker && (
                 <DateTimePicker
@@ -257,6 +314,7 @@ export function ScheduleModal({
 const styles = StyleSheet.create({
     modalOverlay: {
         flex: 1,
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
         justifyContent: 'flex-end',
     },
     modalContainer: {
@@ -464,16 +522,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: SmartHomeColors.purple,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
+        boxShadow: '0 4px 8px rgba(139, 92, 246, 0.2)',
         elevation: 4,
         gap: 8,
     },
     saveBtnEdit: {
         backgroundColor: '#10B981',
-        shadowColor: '#10B981',
+        boxShadow: '0 4px 8px rgba(16, 185, 129, 0.2)',
     },
     addBtnText: {
         fontSize: 14,

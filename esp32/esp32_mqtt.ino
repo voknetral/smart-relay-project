@@ -5,8 +5,8 @@
 #include <time.h>
 
 // --- Configuration ---
-const char *ssid = "YOUR_WIFI_SSID";
-const char *password = "YOUR_WIFI_PASSWORD";
+const char *ssid = "TEKNOLAB Office";
+const char *password = "selamatdatang";
 
 // MQTT Configuration
 const char *mqtt_server = "broker.hivemq.com";
@@ -18,8 +18,6 @@ const char *base_topic = "anomali/device"; // Base topic for all devices
 #define RELAY_PIN_2 17
 #define RELAY_PIN_3 18
 #define RELAY_PIN_4 19
-#define RELAY_PIN_5 21
-#define RELAY_PIN_6 22
 
 // Relay Logic (Active High)
 #define RELAY_ON HIGH
@@ -44,9 +42,7 @@ struct Device {
 Device devices[] = {{"1", RELAY_PIN_1, "", "", "", "", ""},
                     {"2", RELAY_PIN_2, "", "", "", "", ""},
                     {"3", RELAY_PIN_3, "", "", "", "", ""},
-                    {"4", RELAY_PIN_4, "", "", "", "", ""},
-                    {"5", RELAY_PIN_5, "", "", "", "", ""},
-                    {"6", RELAY_PIN_6, "", "", "", "", ""}};
+                    {"4", RELAY_PIN_4, "", "", "", "", ""}};
 
 const int NUM_DEVICES = sizeof(devices) / sizeof(Device);
 
@@ -177,7 +173,7 @@ void checkSchedules() {
       continue;
 
     String json = loadSchedules(i);
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     if (deserializeJson(doc, json))
       continue;
 
@@ -185,10 +181,13 @@ void checkSchedules() {
       if (!s["isEnabled"])
         continue;
 
-      if (strcmp(currentTime, s["startTime"]) == 0) {
+      const char* startTime = s["startTime"].as<const char*>();
+      const char* endTime = s["endTime"].as<const char*>();
+
+      if (startTime && strcmp(currentTime, startTime) == 0) {
         digitalWrite(devices[i].pin, RELAY_ON);
         client.publish(devices[i].topic_state.c_str(), "ON", true);
-      } else if (strcmp(currentTime, s["endTime"]) == 0) {
+      } else if (endTime && strcmp(currentTime, endTime) == 0) {
         digitalWrite(devices[i].pin, RELAY_OFF);
         client.publish(devices[i].topic_state.c_str(), "OFF", true);
       }
@@ -239,8 +238,11 @@ void loop() {
     }
   } else {
     // WiFi lost - non-blocking attempt to reconnect
-    if (millis() % 10000 == 0)
+    static unsigned long last_wifi_ms = 0;
+    if (millis() - last_wifi_ms > 10000) {
+      last_wifi_ms = millis();
       WiFi.begin(ssid, password);
+    }
   }
 
   // Check schedules every few seconds (non-blocking)

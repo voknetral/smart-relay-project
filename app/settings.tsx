@@ -4,7 +4,6 @@ import { TXT } from '@/constants/translations';
 import { useMqtt } from '@/hooks/use-mqtt';
 import { AppConfig, Storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { router, Stack } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -60,14 +59,12 @@ export default function SettingsScreen() {
     useEffect(() => {
         const checkTopic = `${mqttTopic}/availability`;
         const unsubscribe = onMessage((topic, message) => {
-            if (isChecking && topic === checkTopic) {
+            if (topic === checkTopic) {
                 setMcuResultOnline(message.toString() === 'online');
-                // We don't hide checking immediately, we let the user see it 
-                // but we can stop the "failed" timeout if we want.
             }
         });
         return unsubscribe;
-    }, [isChecking, mqttTopic]);
+    }, [mqttTopic, onMessage]);
 
     useEffect(() => {
         const loadConfig = async () => {
@@ -102,8 +99,9 @@ export default function SettingsScreen() {
             return;
         }
 
-        // Reset previous check result
-        setMcuResultOnline(false);
+        // Jangan mereset mcuResultOnline(false) secara paksa jika indikator sudah terbukti nyala.
+        // Broker MQTT publik (HiveMQ) rata-rata MENGAMBAIKAN perintah "subscribe" ulang 
+        // ke topik yang sama, jadi pesan 'online' tidak akan dikirim kedua kalinya.
 
         // Update connection target to whatever is currently typed
         setActiveHost(mqttHost);
@@ -188,7 +186,7 @@ export default function SettingsScreen() {
     if (!config) return null;
 
     return (
-        <BlurView intensity={20} tint="dark" style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: SmartHomeColors.cardBg }}>
             <View style={[styles.container, { paddingTop: insets.top + 8, paddingBottom: insets.bottom }]}>
                 <Stack.Screen options={{ headerShown: false }} />
 
@@ -314,6 +312,7 @@ export default function SettingsScreen() {
                 <Modal
                     animationType="fade"
                     transparent={true}
+                    statusBarTranslucent={true}
                     visible={isResultModalVisible}
                     onRequestClose={() => setIsResultModalVisible(false)}
                 >
@@ -375,6 +374,7 @@ export default function SettingsScreen() {
                 <Modal
                     animationType="fade"
                     transparent={true}
+                    statusBarTranslucent={true}
                     visible={statusModal.visible}
                     onRequestClose={() => setStatusModal(prev => ({ ...prev, visible: false }))}
                 >
@@ -429,7 +429,7 @@ export default function SettingsScreen() {
                     </View>
                 </Modal>
             </View>
-        </BlurView>
+        </View>
     );
 }
 
@@ -602,10 +602,7 @@ const styles = StyleSheet.create({
         maxWidth: 340,
         padding: 24,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.1,
-        shadowRadius: 20,
+        boxShadow: '0 10px 20px rgba(0,0,0,0.1)',
         elevation: 20,
     },
     modalHeader: {
@@ -683,10 +680,7 @@ const styles = StyleSheet.create({
         borderRadius: 18,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: SmartHomeColors.purple,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
+        boxShadow: '0 4px 8px rgba(139, 92, 246, 0.2)',
         elevation: 4,
     },
     modalCloseBtnText: {

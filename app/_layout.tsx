@@ -29,7 +29,6 @@ export default function RootLayout() {
         <Stack.Screen
           name="settings"
           options={{
-            presentation: 'transparentModal',
             headerShown: false,
             animation: 'fade'
           }}

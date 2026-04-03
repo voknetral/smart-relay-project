@@ -2,7 +2,6 @@ import { DeviceIconName } from '@/components/smart-home/DeviceCard';
 import { SmartHomeColors } from '@/constants/theme';
 import { TXT } from '@/constants/translations';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
@@ -35,6 +34,7 @@ interface DeviceEditModalProps {
     deviceIcon: DeviceIconName;
     customIconUri?: string;
     onSave: (newName: string, newIcon: DeviceIconName, customIconUri?: string) => void;
+    onDelete?: () => void;
 }
 
 export function DeviceEditModal({
@@ -44,6 +44,7 @@ export function DeviceEditModal({
     deviceIcon,
     customIconUri,
     onSave,
+    onDelete,
 }: DeviceEditModalProps) {
     const insets = useSafeAreaInsets();
     const [name, setName] = useState(deviceName);
@@ -90,17 +91,19 @@ export function DeviceEditModal({
             statusBarTranslucent={true}
             onRequestClose={onClose}
         >
-            <BlurView intensity={20} tint="dark" style={styles.overlay}>
-                <Pressable style={styles.backdrop} onPress={onClose} />
+            <View style={styles.overlay}>
                 <KeyboardAvoidingView
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) }]}
+                    style={[styles.modalContent, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 24) }]}
                 >
                     <View style={styles.header}>
-                        <Text style={styles.title}>{TXT.device.editDevice}</Text>
-                        <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                            <Ionicons name="close" size={24} color={SmartHomeColors.textPrimary} />
+                        <TouchableOpacity onPress={onClose} style={styles.headerBackBtn}>
+                            <Ionicons name="chevron-back" size={28} color={SmartHomeColors.textPrimary} />
                         </TouchableOpacity>
+                        <View style={styles.headerTitleContainer}>
+                            <Text style={styles.title} numberOfLines={1}>{TXT.device.editDevice}</Text>
+                        </View>
+                        <View style={{ width: 40 }} />
                     </View>
 
                     <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
@@ -164,10 +167,18 @@ export function DeviceEditModal({
                                 ))}
                             </View>
                         </View>
+
                     </ScrollView>
 
-                    <View style={styles.footer}>
-                        <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+                    <View style={styles.bottomSection}>
+                        {onDelete && (
+                            <TouchableOpacity style={styles.deleteZone} onPress={onDelete}>
+                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                <Text style={styles.deleteText}>Hapus Perangkat</Text>
+                            </TouchableOpacity>
+                        )}
+                        <View style={styles.footer}>
+                            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
                             <Text style={styles.cancelText}>{TXT.common.cancel}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -177,9 +188,10 @@ export function DeviceEditModal({
                         >
                             <Text style={styles.saveText}>{TXT.device.saveChanges}</Text>
                         </TouchableOpacity>
+                        </View>
                     </View>
                 </KeyboardAvoidingView>
-            </BlurView>
+            </View>
         </Modal>
     );
 }
@@ -187,6 +199,7 @@ export function DeviceEditModal({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
         justifyContent: 'flex-end',
     },
     backdrop: {
@@ -194,26 +207,39 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         backgroundColor: SmartHomeColors.cardBg,
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
         padding: 24,
-        maxHeight: '94%',
+        flex: 1,
     },
     header: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        justifyContent: 'space-between',
         marginBottom: 20,
+        position: 'relative',
+        height: 48,
+    },
+    headerBackBtn: {
+        padding: 4,
+        marginLeft: -4,
+        zIndex: 10,
+    },
+    headerTitleContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     title: {
-        fontSize: 20,
+        fontSize: 18,
         fontWeight: '800',
         color: SmartHomeColors.textPrimary,
-    },
-    closeBtn: {
-        padding: 5,
+        letterSpacing: -0.5,
     },
     body: {
+        flex: 1,
         marginBottom: 20,
     },
     inputGroup: {
@@ -324,5 +350,24 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         color: '#FFF',
+    },
+    bottomSection: {
+        gap: 12,
+    },
+    deleteZone: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FEF2F2',
+        borderWidth: 1,
+        borderColor: '#FECACA',
+        borderRadius: 14,
+        paddingVertical: 14,
+        gap: 8,
+    },
+    deleteText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#EF4444',
     },
 });

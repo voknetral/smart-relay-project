@@ -6,6 +6,7 @@ import React, { useCallback } from 'react';
 import {
     StyleSheet,
     Text,
+    Pressable,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -34,6 +35,7 @@ interface DeviceCardProps {
     hasSchedules?: boolean;
     onLongPress?: () => void;
     customIconUri?: string;
+    isMcuOnline?: boolean;
 }
 
 function AnimatedToggle({
@@ -108,16 +110,35 @@ export function DeviceCard({
     hasSchedules,
     onLongPress,
     customIconUri,
+    isMcuOnline,
 }: DeviceCardProps) {
     const baseIconName = ICON_MAP[iconType] ?? 'flash';
     const iconName = isOn ? baseIconName : `${baseIconName}-outline`;
     const bgLight = accentColorLight ?? `${accentColor}22`;
 
+    // Assume online if explicitly undefined, else use the provided prop
+    const isOnline = isMcuOnline ?? true;
+
+    const scale = useSharedValue(1);
+    const animatedStyle = useAnimatedStyle(() => {
+        return { transform: [{ scale: scale.value }] };
+    });
+
+    const handlePressIn = () => { scale.value = withSpring(0.96, { mass: 0.5, damping: 12 }); };
+    const handlePressOut = () => { scale.value = withSpring(1, { mass: 0.5, damping: 12 }); };
+
     return (
-        <TouchableOpacity
-            style={[styles.card, isOn && styles.cardOn]}
+        <Animated.View style={[animatedStyle, { flex: 1 }]}>
+        <Pressable
+            style={({ pressed }) => [
+                styles.card,
+                isOn && styles.cardOn,
+                pressed && { opacity: 0.95 },
+                !isOnline && { opacity: 0.6 } // Dim the card if ESP32 is offline
+            ]}
             onLongPress={onLongPress}
-            activeOpacity={0.9}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
             delayLongPress={500}
         >
             {/* Top row: Mode Toggle & Main Toggle */}
@@ -135,7 +156,7 @@ export function DeviceCard({
                     isOn={isOn}
                     accentColor={accentColor}
                     onToggle={onToggle}
-                    disabled={mode === 'auto'}
+                    disabled={mode === 'auto' || !isOnline}
                 />
             </View>
 
@@ -162,9 +183,15 @@ export function DeviceCard({
 
             {/* Status indicator (bottom-left) */}
             <View style={styles.statusIndicator}>
-                <View style={[styles.statusDot, { backgroundColor: isOn ? accentColor : '#E5E7EB' }]} />
-                <Text style={[styles.statusLabel, { color: isOn ? accentColor : SmartHomeColors.textMuted }]}>
-                    {isOn ? TXT.common.on : TXT.common.off}
+                <View style={[
+                  styles.statusDot, 
+                  { backgroundColor: !isOnline ? '#EF4444' : (isOn ? accentColor : '#E5E7EB') }
+                ]} />
+                <Text style={[
+                  styles.statusLabel, 
+                  { color: !isOnline ? '#EF4444' : (isOn ? accentColor : SmartHomeColors.textMuted) }
+                ]}>
+                    {!isOnline ? 'OFFLINE' : (isOn ? TXT.common.on : TXT.common.off)}
                 </Text>
             </View>
 
@@ -185,7 +212,8 @@ export function DeviceCard({
                     </View>
                 )}
             </TouchableOpacity>
-        </TouchableOpacity>
+        </Pressable>
+        </Animated.View>
     );
 }
 
@@ -245,10 +273,7 @@ const styles = StyleSheet.create({
         height: 18,
         borderRadius: 9,
         backgroundColor: '#FFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.18,
-        shadowRadius: 3,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
         elevation: 2,
     },
     centerContent: {
