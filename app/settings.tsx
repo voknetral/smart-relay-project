@@ -1,6 +1,7 @@
 import { APP_DEFAULTS } from '@/constants/Config';
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { AppLanguage } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { useMqttContext } from '@/contexts/MqttContext';
 import { AppConfig, Storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,16 +26,14 @@ import * as Application from 'expo-application';
 
 export default function SettingsScreen() {
     const insets = useSafeAreaInsets();
+    const { TXT, language, setLanguage } = useLanguage();
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [username, setUsername] = useState('');
+    const [selectedLanguage, setSelectedLanguage] = useState<AppLanguage>(language);
     const [mqttTopic, setMqttTopic] = useState('');
     const [mqttHost, setMqttHost] = useState('');
     const [mqttPort, setMqttPort] = useState('');
     const [isChecking, setIsChecking] = useState(false);
-
-    // active host/port for the tester connection, decoupled from input states to prevent spam
-    const [activeHost, setActiveHost] = useState('');
-    const [activePort, setActivePort] = useState('');
 
     const [isResultModalVisible, setIsResultModalVisible] = useState(false);
 
@@ -47,20 +46,14 @@ export default function SettingsScreen() {
         onConfirm: () => { },
     });
 
-    const { connected: mqttConnected, subscribe, onMessage, reconnect, mcuOnline } = useMqttContext();
+    const { connected: mqttConnected, subscribe, reconnect, mcuOnline } = useMqttContext();
 
     // Effect for auto-subscribing when checking and connection succeeds
     useEffect(() => {
         if (isChecking && mqttConnected) {
-            console.log('Checking: Auto-subscribing to availability');
             subscribe(`${mqttTopic}/availability`);
         }
-    }, [isChecking, mqttConnected, mqttTopic]);
-
-    // MCUDiagnostics: Handled by Context now
-    useEffect(() => {
-        // We no longer need local listeners for availability
-    }, [mqttTopic, onMessage]);
+    }, [isChecking, mqttConnected, mqttTopic, subscribe]);
 
     useEffect(() => {
         const loadConfig = async () => {
@@ -68,13 +61,14 @@ export default function SettingsScreen() {
             if (savedConfig) {
                 setConfig(savedConfig);
                 setUsername(savedConfig.username);
+                setSelectedLanguage(savedConfig.language || language);
                 setMqttTopic(savedConfig.mqttTopic!);
                 setMqttHost(savedConfig.mqttHost!);
                 setMqttPort(savedConfig.mqttPort!);
             }
         };
         loadConfig();
-    }, []);
+    }, [language]);
 
     const handleCheckConnection = () => {
         // Validasi port sebelum mencoba connect
@@ -112,11 +106,13 @@ export default function SettingsScreen() {
         const newConfig = {
             ...config,
             username: username.trim(),
+            language: selectedLanguage,
             mqttTopic: mqttTopic.trim() || APP_DEFAULTS.mqttTopic,
             mqttHost: mqttHost.trim() || APP_DEFAULTS.mqttHost,
             mqttPort: mqttPort.trim() || APP_DEFAULTS.mqttPort
         };
         await Storage.saveConfig(newConfig);
+        setLanguage(selectedLanguage);
         
         // Trigger global reconnection with new settings including topic
         reconnect(newConfig.mqttHost, newConfig.mqttPort, newConfig.mqttTopic);
@@ -138,10 +134,6 @@ export default function SettingsScreen() {
         setMqttTopic(() => APP_DEFAULTS.mqttTopic);
         setMqttHost(() => APP_DEFAULTS.mqttHost);
         setMqttPort(() => APP_DEFAULTS.mqttPort);
-
-        // Juga perbarui koneksi aktif agar indikator status ikut reset
-        setActiveHost(APP_DEFAULTS.mqttHost);
-        setActivePort(APP_DEFAULTS.mqttPort);
 
         if (config) {
             const newConfig = {
@@ -198,7 +190,7 @@ export default function SettingsScreen() {
             await IntentLauncher.startActivityAsync('android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', {
                 data: `package:${pkg}`,
             });
-        } catch (err) {
+        } catch {
             // Fallback to general settings if specific intent fails
             IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
         }
@@ -254,6 +246,28 @@ export default function SettingsScreen() {
                                     placeholder={TXT.setup.placeholderName}
                                     placeholderTextColor={SmartHomeColors.textMuted}
                                 />
+                            </View>
+                        </View>
+
+                        <View style={[styles.section, styles.borderTop]}>
+                            <Text style={styles.sectionTitle}>{TXT.settings.language}</Text>
+                            <View style={styles.languageRow}>
+                                <TouchableOpacity
+                                    style={[styles.languageChip, selectedLanguage === 'en' && styles.languageChipActive]}
+                                    onPress={() => setSelectedLanguage('en')}
+                                >
+                                    <Text style={[styles.languageChipText, selectedLanguage === 'en' && styles.languageChipTextActive]}>
+                                        {TXT.settings.english}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.languageChip, selectedLanguage === 'id' && styles.languageChipActive]}
+                                    onPress={() => setSelectedLanguage('id')}
+                                >
+                                    <Text style={[styles.languageChipText, selectedLanguage === 'id' && styles.languageChipTextActive]}>
+                                        {TXT.settings.indonesian}
+                                    </Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
 
@@ -321,7 +335,7 @@ export default function SettingsScreen() {
                         {/* Battery Optimization Section (Android Only) */}
                         {Platform.OS === 'android' && (
                             <View style={[styles.section, styles.borderTop]}>
-                                <Text style={styles.sectionTitle}>Optimasi Baterai</Text>
+                                <Text style={styles.sectionTitle}>{TXT.settings.batteryOptimization}</Text>
                                 <View style={styles.batteryCard}>
                                     <View style={styles.batteryInfo}>
                                         <Ionicons 
@@ -331,12 +345,12 @@ export default function SettingsScreen() {
                                         />
                                         <View style={{ flex: 1 }}>
                                             <Text style={styles.batteryTitle}>
-                                                {isBatteryExempt ? "Optimasi Dinonaktifkan" : "Optimasi Aktif"}
+                                                {isBatteryExempt ? TXT.settings.batteryDisabled : TXT.settings.batteryEnabled}
                                             </Text>
                                             <Text style={styles.batteryDesc}>
                                                 {isBatteryExempt 
-                                                    ? "Aplikasi dapat berjalan lancar di latar belakang." 
-                                                    : "HP Anda mungkin mematikan aplikasi saat di latar belakang."}
+                                                    ? TXT.settings.batteryDisabledDesc
+                                                    : TXT.settings.batteryEnabledDesc}
                                             </Text>
                                         </View>
                                     </View>
@@ -346,13 +360,13 @@ export default function SettingsScreen() {
                                             style={styles.batteryBtn} 
                                             onPress={handleBatteryExemption}
                                         >
-                                            <Text style={styles.batteryBtnText}>Matikan Optimasi</Text>
+                                            <Text style={styles.batteryBtnText}>{TXT.settings.disableOptimization}</Text>
                                             <Ionicons name="open-outline" size={16} color="#FFF" />
                                         </TouchableOpacity>
                                     )}
                                 </View>
                                 <Text style={styles.hint}>
-                                    Penting agar notifikasi jadwal tetap muncul tepat waktu.
+                                    {TXT.settings.batteryHint}
                                 </Text>
                             </View>
                         )}
@@ -585,6 +599,31 @@ const styles = StyleSheet.create({
     },
     inputGroup: {
         gap: 8,
+    },
+    languageRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    languageChip: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 14,
+        backgroundColor: 'rgba(139, 92, 246, 0.03)',
+        borderWidth: 1.5,
+        borderColor: '#E2E8F0',
+        alignItems: 'center',
+    },
+    languageChipActive: {
+        backgroundColor: '#F3E8FF',
+        borderColor: '#C4B5FD',
+    },
+    languageChipText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: SmartHomeColors.textSecondary,
+    },
+    languageChipTextActive: {
+        color: SmartHomeColors.purple,
     },
     label: {
         fontSize: 14,

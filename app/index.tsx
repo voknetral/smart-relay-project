@@ -1,6 +1,5 @@
 import { DeviceCard, DeviceIconName } from '@/components/smart-home/DeviceCard';
 import { DeviceEditModal } from '@/components/smart-home/DeviceEditModal';
-import { LoadingScreen } from '@/components/smart-home/LoadingScreen';
 import { NotificationItem, NotificationModal } from '@/components/smart-home/NotificationModal';
 import { Schedule, ScheduleModal } from '@/components/smart-home/ScheduleModal';
 import { SetupScreen } from '@/components/smart-home/SetupScreen';
@@ -8,7 +7,7 @@ import { WeatherCard } from '@/components/smart-home/WeatherCard';
 import { WeatherStats } from '@/components/smart-home/WeatherStats';
 import { APP_DEFAULTS } from '@/constants/Config';
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { useMqttContext } from '@/contexts/MqttContext';
 import { useNotifications } from '@/hooks/use-notifications';
 import { useWeather } from '@/hooks/use-weather';
@@ -17,7 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as KeepAwake from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -30,6 +30,12 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+if (Platform.OS !== 'web') {
+  SplashScreen.preventAutoHideAsync().catch(() => {
+    // Ignore if splash has already been handled by the runtime.
+  });
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +50,7 @@ interface Device {
   mode: 'auto' | 'manual';
   customIconUri?: string;
   isSynced?: boolean;
+  isHardwareVerified?: boolean;
 }
 
 const INITIAL_DEVICES: Device[] = [
@@ -57,6 +64,7 @@ const INITIAL_DEVICES: Device[] = [
     schedules: [],
     mode: 'auto',
     isSynced: false,
+    isHardwareVerified: true,
   },
   {
     id: '2',
@@ -68,6 +76,7 @@ const INITIAL_DEVICES: Device[] = [
     schedules: [],
     mode: 'auto',
     isSynced: false,
+    isHardwareVerified: true,
   },
   {
     id: '3',
@@ -79,6 +88,7 @@ const INITIAL_DEVICES: Device[] = [
     schedules: [],
     mode: 'auto',
     isSynced: false,
+    isHardwareVerified: true,
   },
   {
     id: '4',
@@ -90,13 +100,9 @@ const INITIAL_DEVICES: Device[] = [
     schedules: [],
     mode: 'auto',
     isSynced: false,
+    isHardwareVerified: true,
   },
 ];
-
-
-
-const DEVICE_STATUS_INTERVAL = 30000; // 30 seconds
-
 // Removed top-level Notification handler and helper for web compatibility.
 // These are now handled in useNotifications hook.
 
@@ -113,7 +119,7 @@ export default function HomeScreen() {
 
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const isWide = width > 560;
+  const { TXT } = useLanguage();
 
   // Setup state
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -127,17 +133,27 @@ export default function HomeScreen() {
           setConfig(savedConfig);
 
           if (savedConfig.customDevices && savedConfig.customDevices.length > 0) {
-            setDevices(savedConfig.customDevices.map(c => ({
-              id: c.id,
-              name: c.name,
-              iconType: c.iconType as any,
-              customIconUri: c.customIconUri,
-              accentColor: c.accentColor || SmartHomeColors.purple,
-              isOn: false,
-              schedules: [],
-              mode: 'auto',
-              isSynced: false,
-            })));
+            setDevices(prev => {
+              const previousById = new Map(prev.map(device => [device.id, device]));
+
+              return savedConfig.customDevices!.map(c => {
+                const previous = previousById.get(c.id);
+
+                return {
+                  id: c.id,
+                  name: c.name,
+                  iconType: c.iconType as any,
+                  customIconUri: c.customIconUri,
+                  accentColor: c.accentColor || SmartHomeColors.purple,
+                  accentColorLight: previous?.accentColorLight,
+                  isOn: previous?.isOn ?? false,
+                  schedules: previous?.schedules ?? [],
+                  mode: previous?.mode ?? 'auto',
+                  isSynced: previous?.isSynced ?? false,
+                  isHardwareVerified: previous?.isHardwareVerified ?? c.isHardwareVerified ?? ['1', '2', '3', '4'].includes(c.id),
+                };
+              });
+            });
           } else if (savedConfig.deviceSettings) {
             setDevices(prev => prev.map(d => {
               const settings = savedConfig.deviceSettings?.[d.id];
@@ -167,28 +183,48 @@ export default function HomeScreen() {
   const weather = useWeather(config?.city);
   const { connected: mqttConnected, subscribe, publish, onMessage, mcuOnline } = useMqttContext();
 
-  const { requestPermissions, sendScheduleNotification } = useNotifications();
+  const { requestPermissions, sendNotification, sendScheduleNotification } = useNotifications();
   const [devices, setDevices] = useState<Device[]>(INITIAL_DEVICES);
+  const appStateRef = useRef(AppState.currentState);
+  const previousMqttConnectedRef = useRef<boolean | null>(null);
+  const previousMcuOnlineRef = useRef<boolean | null>(null);
 
   // Modal states
   const [isNotifModalVisible, setIsNotifModalVisible] = useState(false);
   const [scheduledDeviceId, setScheduledDeviceId] = useState<string | null>(null);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
-  const [isGlobalVerifying, setIsGlobalVerifying] = useState(false);
+  const [busyDeviceIds, setBusyDeviceIds] = useState<Record<string, boolean>>({});
   const verifyTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const verifyTokenRef = React.useRef<string | null>(null);
+  const commandCooldownsRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const lastSyncRequestAtRef = React.useRef(0);
 
   // Cleanup no-op timers if komponen unmount
   useEffect(() => {
+    const cooldowns = commandCooldownsRef.current;
     return () => {
       if (verifyTimeoutRef.current) {
         clearTimeout(verifyTimeoutRef.current);
       }
+      Object.values(cooldowns).forEach((timer) => clearTimeout(timer));
     };
   }, []);
 
   // Notification History State
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
+  const persistDevices = useCallback((deviceList: Device[]) => {
+    const mapped = deviceList.map((d) => ({
+      id: d.id,
+      name: d.name,
+      iconType: d.iconType,
+      customIconUri: d.customIconUri,
+      accentColor: d.accentColor,
+      isHardwareVerified: d.isHardwareVerified,
+    }));
+    Storage.saveCustomDevices(mapped);
+  }, []);
 
   const addNotification = (title: string, message: string, type: NotificationItem['type'] = 'info') => {
     const newItem: NotificationItem = {
@@ -201,20 +237,128 @@ export default function HomeScreen() {
     setNotifications(prev => [newItem, ...prev].slice(0, 50)); // Keep last 50
   };
 
-  useEffect(() => {
-    requestPermissions();
+  const setDeviceBusy = useCallback((deviceId: string, busy: boolean) => {
+    setBusyDeviceIds((prev) => {
+      if (busy) {
+        return { ...prev, [deviceId]: true };
+      }
+
+      const next = { ...prev };
+      delete next[deviceId];
+      return next;
+    });
   }, []);
 
+  const startDeviceCooldown = useCallback((deviceId: string, duration = 700) => {
+    setDeviceBusy(deviceId, true);
 
-
-  // Sync MCU status with MQTT status
-  useEffect(() => {
-    if (!mqttConnected) {
-      setDevices(prev => prev.map(d => ({ ...d, isSynced: false })));
+    if (commandCooldownsRef.current[deviceId]) {
+      clearTimeout(commandCooldownsRef.current[deviceId]);
     }
-  }, [mqttConnected]);
+
+    commandCooldownsRef.current[deviceId] = setTimeout(() => {
+      delete commandCooldownsRef.current[deviceId];
+      setDeviceBusy(deviceId, false);
+    }, duration);
+  }, [setDeviceBusy]);
+
+  const clearDeviceCooldown = useCallback((deviceId: string) => {
+    if (commandCooldownsRef.current[deviceId]) {
+      clearTimeout(commandCooldownsRef.current[deviceId]);
+      delete commandCooldownsRef.current[deviceId];
+    }
+    setDeviceBusy(deviceId, false);
+  }, [setDeviceBusy]);
 
   useEffect(() => {
+    requestPermissions();
+  }, [requestPermissions]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      appStateRef.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isReady && Platform.OS !== 'web') {
+      SplashScreen.hideAsync().catch(() => {
+        // Ignore hide errors to avoid blocking startup.
+      });
+    }
+  }, [isReady]);
+
+  useEffect(() => {
+    const previous = previousMqttConnectedRef.current;
+    previousMqttConnectedRef.current = mqttConnected;
+
+    if (previous === null || previous === mqttConnected) {
+      return;
+    }
+
+    const title = mqttConnected ? 'MQTT Connected' : 'MQTT Disconnected';
+    const body = mqttConnected
+      ? 'Koneksi ke broker MQTT aktif kembali.'
+      : 'Koneksi ke broker MQTT terputus.';
+
+    addNotification(title, body, mqttConnected ? 'success' : 'warning');
+
+    if (appStateRef.current !== 'active') {
+      sendNotification(title, body, {
+        type: 'mqtt-status',
+        connected: mqttConnected,
+      });
+    }
+  }, [mqttConnected, sendNotification]);
+
+  useEffect(() => {
+    const previous = previousMcuOnlineRef.current;
+    previousMcuOnlineRef.current = mcuOnline;
+
+    if (previous === null || previous === mcuOnline || !mqttConnected) {
+      return;
+    }
+
+    const title = mcuOnline ? 'ESP32 Online' : 'ESP32 Offline';
+    const body = mcuOnline
+      ? 'ESP32 kembali merespons dan siap digunakan.'
+      : 'ESP32 tidak merespons. Periksa daya dan koneksi MQTT.';
+
+    addNotification(title, body, mcuOnline ? 'success' : 'warning');
+
+    if (appStateRef.current !== 'active') {
+      sendNotification(title, body, {
+        type: 'mcu-status',
+        online: mcuOnline,
+      });
+    }
+  }, [mcuOnline, mqttConnected, sendNotification]);
+
+  const requestStateSync = useCallback((reason: 'connect' | 'resume' | 'verify-success' = 'connect') => {
+    if (!mqttConnected) {
+      return;
+    }
+
+    const now = Date.now();
+    const minGap = reason === 'verify-success' ? 0 : 12000;
+    if (now - lastSyncRequestAtRef.current < minGap) {
+      return;
+    }
+
+    lastSyncRequestAtRef.current = now;
+    const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
+    publish(`${baseTopic}/get`, 'SYNC');
+  }, [mqttConnected, publish, config?.mqttTopic]);
+
+  useEffect(() => {
+    const scheduleTriggeredLabel = TXT.home.scheduleTriggered;
+    const turnedByScheduleLabel = TXT.home.turnedBySchedule;
+    const turnedOffByScheduleLabel = TXT.home.turnedOffBySchedule;
+
     if (mqttConnected) {
       const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
       // Subscribe to all device state topics
@@ -222,9 +366,10 @@ export default function HomeScreen() {
         subscribe(`${baseTopic}/${device.id}/state`);
         subscribe(`${baseTopic}/${device.id}/mode/state`);
         subscribe(`${baseTopic}/${device.id}/availability`);
+        subscribe(`${baseTopic}/${device.id}/verify`);
       });
 
-      onMessage((topic, message) => {
+      return onMessage((topic, message) => {
         const msgStr = message.toString();
         const parts = topic.split('/');
         const baseParts = baseTopic.split('/');
@@ -234,47 +379,61 @@ export default function HomeScreen() {
 
         const deviceId = parts[baseParts.length];
         const action = parts[baseParts.length + 1];
+        const isPendingVerification = deviceId === verifyingId && verifyTokenRef.current !== null;
 
-        if (action === 'availability') {
-          let becameVerified = false;
-          setDevices((prev) =>
-            prev.map((d) => {
-              if (d.id === deviceId && !d.isSynced) {
-                if (d.id === verifyingId) becameVerified = true;
-                return { ...d, isSynced: true };
-              }
-              return d;
-            }),
-          );
-
-          if (becameVerified) {
+        if (action === 'verify') {
+          if (deviceId === verifyingId && msgStr === verifyTokenRef.current) {
             if (verifyTimeoutRef.current) {
               clearTimeout(verifyTimeoutRef.current);
               verifyTimeoutRef.current = null;
             }
+
+            verifyTokenRef.current = null;
             setVerifyingId(null);
+            setDevices((prev) => {
+              const updated = prev.map((d) =>
+                d.id === deviceId ? { ...d, isSynced: true, isHardwareVerified: true } : d,
+              );
+              persistDevices(updated);
+              return updated;
+            });
+            requestStateSync('verify-success');
             addNotification('Verifikasi Berhasil', `ID ${deviceId} terdeteksi di ESP32.`, 'success');
           }
           return;
         }
 
+        if (action === 'availability') {
+          setDevices((prev) =>
+            prev.map((d) => {
+              if (d.id === deviceId && isPendingVerification) {
+                return d;
+              }
+              if (d.id === deviceId && d.isHardwareVerified && !d.isSynced) {
+                return { ...d, isSynced: true };
+              }
+              return d;
+            }),
+          );
+          return;
+        }
+
         if (action === 'state') {
           const newState = msgStr === 'ON';
-          let becameVerified = false;
+          clearDeviceCooldown(deviceId);
 
           setDevices((prev) =>
             prev.map((d) => {
-              if (d.id === deviceId && (d.isOn !== newState || !d.isSynced)) {
-                if (d.id === verifyingId) {
-                  becameVerified = true;
-                }
-
+              if (d.id === deviceId && isPendingVerification) {
+                return d;
+              }
+              if (d.id === deviceId && d.isHardwareVerified && (d.isOn !== newState || !d.isSynced)) {
                 // If it's a state change while in AUTO mode, it's likely a schedule trigger from ESP32
                 if (d.isSynced && d.isOn !== newState && d.mode === 'auto') {
                   sendScheduleNotification(d.name, newState);
                   addNotification(
-                    TXT.home.scheduleTriggered,
-                    `${d.name} ${newState ? TXT.home.turnedBySchedule : TXT.home.turnedOffBySchedule}`,
+                    scheduleTriggeredLabel,
+                    `${d.name} ${newState ? turnedByScheduleLabel : turnedOffByScheduleLabel}`,
                     'info'
                   );
                 }
@@ -283,47 +442,34 @@ export default function HomeScreen() {
               return d;
             }),
           );
-
-          if (becameVerified) {
-            if (verifyTimeoutRef.current) {
-              clearTimeout(verifyTimeoutRef.current);
-              verifyTimeoutRef.current = null;
-            }
-            setVerifyingId(null);
-            addNotification('Verifikasi Berhasil', `ID ${deviceId} terdeteksi di ESP32.`, 'success');
-          }
         } else if (action === 'mode') {
           const newMode = msgStr as 'auto' | 'manual';
-          let becameVerified = false;
 
           setDevices((prev) =>
             prev.map((d) => {
-              if (d.id === deviceId && (d.mode !== newMode || !d.isSynced)) {
-                if (d.id === verifyingId) {
-                  becameVerified = true;
-                }
+              if (d.id === deviceId && isPendingVerification) {
+                return d;
+              }
+              if (d.id === deviceId && d.isHardwareVerified && (d.mode !== newMode || !d.isSynced)) {
                 return { ...d, mode: newMode, isSynced: true };
               }
               return d;
             }),
           );
-
-          if (becameVerified) {
-            if (verifyTimeoutRef.current) {
-              clearTimeout(verifyTimeoutRef.current);
-              verifyTimeoutRef.current = null;
-            }
-            setVerifyingId(null);
-            addNotification('Verifikasi Berhasil', `ID ${deviceId} terdeteksi di ESP32.`, 'success');
-          }
         }
       });
     }
-  }, [mqttConnected, onMessage, subscribe, config?.mqttTopic, verifyingId]);
+  }, [TXT.home.scheduleTriggered, TXT.home.turnedBySchedule, TXT.home.turnedOffBySchedule, clearDeviceCooldown, mqttConnected, devices, onMessage, persistDevices, requestStateSync, sendScheduleNotification, subscribe, config?.mqttTopic, verifyingId]);
 
   const onDeviceCount = devices.filter((d) => d.isOn).length;
 
   const toggleDevice = (id: string, newState: boolean) => {
+    if (busyDeviceIds[id]) {
+      return;
+    }
+
+    startDeviceCooldown(id);
+
     // Optimistic UI update
     setDevices((prev) =>
       prev.map((d) => (d.id === id ? { ...d, isOn: newState } : d)),
@@ -333,6 +479,8 @@ export default function HomeScreen() {
     if (mqttConnected) {
       const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
       publish(`${baseTopic}/${id}/set`, newState ? 'ON' : 'OFF');
+    } else {
+      clearDeviceCooldown(id);
     }
   };
 
@@ -367,110 +515,36 @@ export default function HomeScreen() {
     }
   };
 
-  // Trigger state sync on initial connection
+  // Trigger lightweight state sync on initial connection
   useEffect(() => {
     if (mqttConnected) {
-      const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
-      
-      // Start global verification
-      setIsGlobalVerifying(true);
-      // Reset isSynced for all to clear any false positives from retained messages
-      setDevices(prev => prev.map(d => ({ ...d, isSynced: false })));
-      
-      publish(`${baseTopic}/get`, 'SYNC');
-
-      const timer = setTimeout(() => {
-        setIsGlobalVerifying(false);
-
-        setDevices((prev) => {
-          const confirmed = prev.filter((d) => d.isSynced !== false);
-          if (confirmed.length !== prev.length) {
-            const mapped = confirmed.map((d) => ({
-              id: d.id,
-              name: d.name,
-              iconType: d.iconType,
-              customIconUri: d.customIconUri,
-              accentColor: d.accentColor,
-            }));
-            Storage.saveCustomDevices(mapped);
-            const removed = prev.filter((d) => d.isSynced === false);
-            if (removed.length > 0) {
-              addNotification(
-                'Verifikasi Gagal',
-                `Device tidak terverifikasi akan dihapus: ${removed.map((d) => d.name).join(', ')}`,
-                'warning'
-              );
-            }
-          }
-          return confirmed;
-        });
-      }, 5000);
-
-      return () => clearTimeout(timer);
+      requestStateSync('connect');
     }
-  }, [mqttConnected, publish, config?.mqttTopic]);
+  }, [mqttConnected, requestStateSync]);
 
-  // RE-SYNC when app comes back from background (Critical for No-Server Setup)
+  // RE-SYNC when app comes back from background
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
+      appStateRef.current = nextAppState;
+
       if (nextAppState === 'active' && mqttConnected) {
-        console.log('App returned to foreground, triggering re-sync...');
-        const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
-        
-        setIsGlobalVerifying(true);
-        setDevices(prev => prev.map(d => ({ ...d, isSynced: false })));
-        
-        publish(`${baseTopic}/get`, 'SYNC');
-        
-        setTimeout(() => {
-          setIsGlobalVerifying(false);
-          setDevices((prev) => {
-            const confirmed = prev.filter((d) => d.isSynced !== false);
-            if (confirmed.length !== prev.length) {
-              const mapped = confirmed.map((d) => ({
-                id: d.id,
-                name: d.name,
-                iconType: d.iconType,
-                customIconUri: d.customIconUri,
-                accentColor: d.accentColor,
-              }));
-              Storage.saveCustomDevices(mapped);
-              const removed = prev.filter((d) => d.isSynced === false);
-              if (removed.length > 0) {
-                addNotification(
-                  'Verifikasi Gagal',
-                  `Device tidak terverifikasi akan dihapus: ${removed.map((d) => d.name).join(', ')}`,
-                  'warning'
-                );
-              }
-            }
-            return confirmed;
-          });
-        }, 5000);
+        requestStateSync('resume');
       }
     });
 
     return () => {
       subscription.remove();
     };
-  }, [mqttConnected, publish, config?.mqttTopic]);
+  }, [mqttConnected, requestStateSync]);
 
-  const handleUpdateDevice = async (id: string, name: string, iconType: DeviceIconName, customIconUri?: string) => {
-    // Optimistic state
-    setDevices(prev => prev.map(d => d.id === id ? { ...d, name, iconType, customIconUri } : d));
-    
-    // Convert current devices state into saveable array, updating the target ID
+  const handleUpdateDevice = async (id: string, name: string, iconType: DeviceIconName) => {
     setDevices(currentDevices => {
-       const mapped = currentDevices.map(d => ({
-           id: d.id,
-           name: d.name,
-           iconType: d.iconType,
-           customIconUri: d.customIconUri,
-           accentColor: d.accentColor
-       }));
-       Storage.saveCustomDevices(mapped);
-       return currentDevices;
+       const updatedDevices = currentDevices.map(d => d.id === id ? { ...d, name, iconType, customIconUri: undefined } : d);
+       persistDevices(updatedDevices);
+       return updatedDevices;
     });
+    setEditingDeviceId(null);
+    addNotification('Perangkat Diperbarui', `${name} berhasil disimpan.`, 'success');
   };
 
   const handleAddDevice = () => {
@@ -498,6 +572,7 @@ export default function HomeScreen() {
       schedules: [],
       mode: 'auto',
       isSynced: false,
+      isHardwareVerified: false,
     };
 
     // Tambahkan sementara lalu verifikasi; status kartu tetap "OFFLINE" sampai verifikasi sukses.
@@ -507,10 +582,13 @@ export default function HomeScreen() {
     if (!mqttConnected) {
       addNotification(
         "MQTT Tidak Terhubung",
-        "Tidak bisa memverifikasi device baru tanpa koneksi MQTT. Device akan dihapus.",
+        "Tidak bisa memverifikasi device baru tanpa koneksi MQTT. Device akan tetap dibuat dalam status OFFLINE.",
         'warning'
       );
-      setDevices(prev => prev.filter((d) => d.id !== newId));
+      setDevices(prev => {
+        persistDevices(prev);
+        return prev;
+      });
       setVerifyingId(null);
       return;
     }
@@ -518,8 +596,16 @@ export default function HomeScreen() {
     const baseTopic = config?.mqttTopic || APP_DEFAULTS.mqttTopic;
     subscribe(`${baseTopic}/${newId}/state`);
     subscribe(`${baseTopic}/${newId}/mode/state`);
+    subscribe(`${baseTopic}/${newId}/availability`);
+    subscribe(`${baseTopic}/${newId}/verify`);
 
-    publish(`${baseTopic}/get`, 'SYNC');
+    const verifyToken = `verify-${newId}-${Date.now()}`;
+    verifyTokenRef.current = verifyToken;
+    setTimeout(() => {
+      if (verifyTokenRef.current === verifyToken) {
+        publish(`${baseTopic}/verify`, verifyToken);
+      }
+    }, 250);
 
     // Verification timeout - 5s
     if (verifyTimeoutRef.current) {
@@ -532,31 +618,17 @@ export default function HomeScreen() {
         setDevices(currentDevices => {
           const dev = currentDevices.find(d => d.id === newId);
           if (dev && !dev.isSynced) {
+            verifyTokenRef.current = null;
             addNotification(
-              "Hardware Tidak Terdeteksi",
-              `ID ${newId} belum diprogram di ESP32. Card akan dihapus.`,
+              "Device Offline",
+              `ID ${newId} belum merespons dari ESP32. Card tetap dibuat sebagai OFFLINE.`,
               'warning'
             );
-            const filtered = currentDevices.filter((d) => d.id !== newId);
-            const mapped = filtered.map((d) => ({
-              id: d.id,
-              name: d.name,
-              iconType: d.iconType,
-              customIconUri: d.customIconUri,
-              accentColor: d.accentColor,
-            }));
-            Storage.saveCustomDevices(mapped);
-            return filtered;
+            persistDevices(currentDevices);
+            return currentDevices;
           }
           if (dev) {
-            const mapped = currentDevices.map((d) => ({
-              id: d.id,
-              name: d.name,
-              iconType: d.iconType,
-              customIconUri: d.customIconUri,
-              accentColor: d.accentColor,
-            }));
-            Storage.saveCustomDevices(mapped);
+            persistDevices(currentDevices);
             addNotification(
               "Verifikasi Berhasil",
               `Perangkat ${dev.name} berhasil diverifikasi.`,
@@ -570,22 +642,13 @@ export default function HomeScreen() {
         return null; // Clear verifying status
       });
     }, 5000);
-
-    setEditingDeviceId(newId);
   };
 
   const handleDeleteDevice = (id: string) => {
     const proceed = () => {
       setDevices(prev => {
         const newDevices = prev.filter(d => d.id !== id);
-        const mapped = newDevices.map(d => ({
-           id: d.id,
-           name: d.name,
-           iconType: d.iconType,
-           customIconUri: d.customIconUri,
-           accentColor: d.accentColor
-        }));
-        Storage.saveCustomDevices(mapped);
+        persistDevices(newDevices);
         return newDevices;
       });
       setEditingDeviceId(null);
@@ -611,7 +674,23 @@ export default function HomeScreen() {
     return (availableWidth - 16) / 2;                         // 2 columns
   };
 
-  if (!isReady) return <LoadingScreen />;
+  const getColumnCount = () => {
+    if (width > 1024) return 4;
+    if (width > 700) return 3;
+    return 2;
+  };
+
+  const getAddCardWidth = () => {
+    const columns = getColumnCount();
+    const cellWidth = getCellWidth();
+    const isNewRow = devices.length % columns === 0;
+
+    if (!isNewRow) return cellWidth;
+
+    return (cellWidth * columns) + (16 * (columns - 1));
+  };
+
+  if (!isReady) return null;
 
   if (!config) {
     return <SetupScreen onComplete={handleSetupComplete} />;
@@ -668,7 +747,7 @@ export default function HomeScreen() {
                 ]}>
                   <View style={[styles.statusDot, { backgroundColor: mqttConnected ? '#10B981' : '#EF4444' }]} />
                   <Text style={[styles.statusBadgeText, { color: mqttConnected ? '#10B981' : '#EF4444' }]}>
-                    {mqttConnected ? TXT.home.mqttStatus : 'MQTT DISCONNECTED'}
+                    {mqttConnected ? TXT.home.mqttStatus : TXT.home.mqttDisconnected}
                   </Text>
                 </View>
                 <View style={[
@@ -678,7 +757,7 @@ export default function HomeScreen() {
                 ]}>
                   <View style={[styles.statusDot, { backgroundColor: mcuOnline ? '#10B981' : '#EF4444' }]} />
                   <Text style={[styles.statusBadgeText, { color: mcuOnline ? '#10B981' : '#EF4444' }]}>
-                    {mcuOnline ? TXT.home.mcuStatus : 'ESP32 OFFLINE'}
+                    {mcuOnline ? TXT.home.mcuStatus : TXT.home.esp32Offline}
                   </Text>
                 </View>
               </View>
@@ -735,14 +814,14 @@ export default function HomeScreen() {
                   onSchedulePress={() => setScheduledDeviceId(device.id)}
                   hasSchedules={device.schedules?.some(s => s.isEnabled)}
                   onLongPress={() => setEditingDeviceId(device.id)}
-                  customIconUri={device.customIconUri}
+                  isBusy={!!busyDeviceIds[device.id]}
                   isMcuOnline={mcuOnline && device.isSynced !== false}
-                  isVerifying={isGlobalVerifying || (device.id === verifyingId)}
+                  isVerifying={device.id === verifyingId}
                 />
               </View>
             ))}
             <TouchableOpacity 
-               style={[styles.addDeviceCard, { width: getCellWidth() }]} 
+               style={[styles.addDeviceCard, { width: getAddCardWidth() }]} 
                onPress={handleAddDevice}
                activeOpacity={0.7}
             >
@@ -755,10 +834,10 @@ export default function HomeScreen() {
             <DeviceEditModal
               visible={!!editingDeviceId}
               onClose={() => setEditingDeviceId(null)}
+              deviceId={editingDevice.id}
               deviceName={editingDevice.name}
               deviceIcon={editingDevice.iconType}
-              customIconUri={editingDevice.customIconUri}
-              onSave={(name, icon, customIcon) => handleUpdateDevice(editingDevice.id, name, icon, customIcon)}
+              onSave={(name, icon) => handleUpdateDevice(editingDevice.id, name, icon)}
               onDelete={() => handleDeleteDevice(editingDevice.id)}
             />
           )}

@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 export function useNotifications() {
@@ -7,12 +8,40 @@ export function useNotifications() {
         return Platform.OS === 'android' && Constants.appOwnership === 'expo';
     };
 
-    const sendScheduleNotification = async (deviceName: string, isOn: boolean) => {
+    useEffect(() => {
+        if (Platform.OS === 'web' || isUnsupportedExpoGoAndroid()) return;
+
+        let isMounted = true;
+
+        const setupHandler = async () => {
+            try {
+                const Notifications = await import('expo-notifications');
+                if (!isMounted) return;
+
+                Notifications.setNotificationHandler({
+                    handleNotification: async () => ({
+                        shouldShowBanner: true,
+                        shouldShowList: true,
+                        shouldPlaySound: true,
+                        shouldSetBadge: false,
+                    }),
+                });
+            } catch (err) {
+                console.warn('Notification handler setup error:', err);
+            }
+        };
+
+        setupHandler();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const sendNotification = async (title: string, body: string, data?: Record<string, any>) => {
         if (Platform.OS === 'web') return;
 
-        // Skip on Expo Go Android to avoid SDK 54 error
         if (isUnsupportedExpoGoAndroid()) {
-            console.log('Skipping notification: Not supported in Expo Go on Android.');
             return;
         }
 
@@ -20,9 +49,9 @@ export function useNotifications() {
             const Notifications = await import('expo-notifications');
             await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: "Schedule Triggered",
-                    body: `${deviceName} has been turned ${isOn ? 'ON' : 'OFF'} by schedule.`,
-                    data: { deviceName, isOn },
+                    title,
+                    body,
+                    data: data ?? {},
                 },
                 trigger: null,
             });
@@ -31,12 +60,18 @@ export function useNotifications() {
         }
     };
 
+    const sendScheduleNotification = async (deviceName: string, isOn: boolean) => {
+        await sendNotification(
+            'Schedule Triggered',
+            `${deviceName} has been turned ${isOn ? 'ON' : 'OFF'} by schedule.`,
+            { deviceName, isOn, type: 'schedule' },
+        );
+    };
+
     const requestPermissions = async () => {
         if (Platform.OS === 'web') return;
 
-        // Skip on Expo Go Android to avoid SDK 54 error
         if (isUnsupportedExpoGoAndroid()) {
-            console.log('Notifications permissions skipped: Use a development build for Android notifications.');
             return;
         }
 
@@ -63,6 +98,7 @@ export function useNotifications() {
     };
 
     return {
+        sendNotification,
         sendScheduleNotification,
         requestPermissions,
     };

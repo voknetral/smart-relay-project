@@ -1,7 +1,6 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import React, { useCallback } from 'react';
 import {
     StyleSheet,
@@ -12,7 +11,21 @@ import {
 } from 'react-native';
 import Animated, { interpolate, interpolateColor, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
-export type DeviceIconName = 'humidifier' | 'plug' | 'light' | 'fan' | 'ac';
+export type DeviceIconName =
+    | 'humidifier'
+    | 'plug'
+    | 'light'
+    | 'fan'
+    | 'ac'
+    | 'tv'
+    | 'speaker'
+    | 'coffee'
+    | 'lock'
+    | 'camera'
+    | 'wifi'
+    | 'water'
+    | 'flame'
+    | 'car';
 
 const ICON_MAP: Record<DeviceIconName, string> = {
     humidifier: 'water',
@@ -20,6 +33,15 @@ const ICON_MAP: Record<DeviceIconName, string> = {
     light: 'bulb',
     fan: 'aperture',
     ac: 'snow',
+    tv: 'tv',
+    speaker: 'volume-high',
+    coffee: 'cafe',
+    lock: 'lock-closed',
+    camera: 'videocam',
+    wifi: 'wifi',
+    water: 'water-outline',
+    flame: 'flame',
+    car: 'car-sport',
 };
 
 interface DeviceCardProps {
@@ -34,7 +56,7 @@ interface DeviceCardProps {
     onSchedulePress?: () => void;
     hasSchedules?: boolean;
     onLongPress?: () => void;
-    customIconUri?: string;
+    isBusy?: boolean;
     isMcuOnline?: boolean;
     isVerifying?: boolean;
 }
@@ -59,7 +81,7 @@ function AnimatedToggle({
             stiffness: 120,
             overshootClamping: false,
         });
-    }, [isOn]);
+    }, [isOn, isToggled]);
 
     const handlePress = useCallback(() => {
         if (disabled) return;
@@ -110,10 +132,11 @@ export function DeviceCard({
     onSchedulePress,
     hasSchedules,
     onLongPress,
-    customIconUri,
+    isBusy,
     isMcuOnline,
     isVerifying,
 }: DeviceCardProps) {
+    const { TXT } = useLanguage();
     const baseIconName = ICON_MAP[iconType] ?? 'flash';
     const iconName = isOn ? baseIconName : `${baseIconName}-outline`;
     const bgLight = accentColorLight ?? `${accentColor}22`;
@@ -149,6 +172,7 @@ export function DeviceCard({
                     onPress={onToggleMode}
                     style={[styles.modeToggle, mode === 'auto' ? styles.modeAuto : styles.modeManual]}
                     activeOpacity={0.7}
+                    disabled={isBusy}
                 >
                     <Text style={[styles.modeText, mode === 'auto' ? styles.modeTextAuto : styles.modeTextManual]}>
                         {(mode === 'auto' ? TXT.common.auto : TXT.common.manual).toUpperCase()}
@@ -158,26 +182,18 @@ export function DeviceCard({
                     isOn={isOn}
                     accentColor={accentColor}
                     onToggle={onToggle}
-                    disabled={mode === 'auto' || !isOnline}
+                    disabled={mode === 'auto' || !isOnline || isBusy}
                 />
             </View>
 
             {/* Centered Main Content */}
             <View style={styles.centerContent}>
                 <View style={[styles.iconBox, { backgroundColor: isOn ? accentColor : bgLight }]}>
-                    {customIconUri ? (
-                        <Image
-                            source={{ uri: customIconUri }}
-                            style={styles.customIcon}
-                            contentFit="cover"
-                        />
-                    ) : (
-                        <Ionicons
-                            name={iconName as any}
-                            size={28}
-                            color={isOn ? '#FFF' : accentColor}
-                        />
-                    )}
+                    <Ionicons
+                        name={iconName as any}
+                        size={28}
+                        color={isOn ? '#FFF' : accentColor}
+                    />
                 </View>
 
                 <Text style={styles.deviceName} numberOfLines={1}>{name}</Text>
@@ -190,7 +206,7 @@ export function DeviceCard({
                   { 
                     backgroundColor: isVerifying 
                       ? '#94A3B8' 
-                      : (!isOnline ? '#EF4444' : (isOn ? accentColor : '#E5E7EB')) 
+                      : (isBusy ? '#F59E0B' : (!isOnline ? '#EF4444' : (isOn ? accentColor : '#E5E7EB'))) 
                   }
                 ]} />
                 <Text style={[
@@ -198,10 +214,10 @@ export function DeviceCard({
                   { 
                     color: isVerifying 
                       ? '#94A3B8' 
-                      : (!isOnline ? '#EF4444' : (isOn ? accentColor : SmartHomeColors.textMuted)) 
+                      : (isBusy ? '#F59E0B' : (!isOnline ? '#EF4444' : (isOn ? accentColor : SmartHomeColors.textMuted))) 
                   }
                 ]}>
-                    {isVerifying ? 'VERIFYING...' : (!isOnline ? 'OFFLINE' : (isOn ? TXT.common.on : TXT.common.off))}
+                    {isVerifying ? TXT.device.verifying : (isBusy ? TXT.device.waiting : (!isOnline ? TXT.device.offline : (isOn ? TXT.common.on : TXT.common.off)))}
                 </Text>
             </View>
 
@@ -300,10 +316,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 8,
         overflow: 'hidden',
-    },
-    customIcon: {
-        width: '100%',
-        height: '100%',
     },
     deviceName: {
         fontSize: 15,

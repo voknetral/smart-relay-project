@@ -3,6 +3,12 @@ import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { bmkgToInfo, getAdm4ByDistrict } from './bmkg-utils';
 
+const debugWeather = (...args: any[]) => {
+    if (__DEV__) {
+        console.log(...args);
+    }
+};
+
 // ── IP geolocation (web fallback, no permission needed) ───────────────────────
 async function getCoordsByIP(): Promise<{ lat: number; lon: number; city: string }> {
     try {
@@ -51,8 +57,8 @@ async function fetchBMKGWeather(lat: number, lon: number, district: string, city
         const adm4Code = getAdm4ByDistrict(district, cityFallback);
 
         const url = `https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=${adm4Code}`;
-        console.log(`Weather: Mapping area "${district || cityFallback}" to ADM4 code: ${adm4Code}`);
-        console.log(`Weather: Fetching BMKG data from: ${url}`);
+        debugWeather(`Weather: Mapping area "${district || cityFallback}" to ADM4 code: ${adm4Code}`);
+        debugWeather(`Weather: Fetching BMKG data from: ${url}`);
 
         const res = await fetch(url);
         if (!res.ok) {
@@ -60,7 +66,7 @@ async function fetchBMKGWeather(lat: number, lon: number, district: string, city
             throw new Error(`BMKG error ${res.status}`);
         }
         const json = await res.json();
-        console.log(`Weather: BMKG API response received for ${district}`);
+        debugWeather(`Weather: BMKG API response received for ${district}`);
 
         if (!json.data || json.data.length === 0) {
             console.warn(`Weather: No BMKG data returned for ADM4:${adm4Code}`);
@@ -113,13 +119,13 @@ export function useWeather(customCity?: string): WeatherData {
         async function fetchWeather() {
             try {
                 if (Platform.OS === 'web') {
-                    console.log('Weather: Using IP for geolocation (Web)');
+                    debugWeather('Weather: Using IP for geolocation (Web)');
                     const { lat, lon, city } = await getCoordsByIP();
                     await fetchBMKGWeather(lat, lon, customCity || city, city, cancelled, setData);
                     return;
                 }
 
-                console.log('Weather: Requesting location permissions...');
+                debugWeather('Weather: Requesting location permissions...');
                 const { status } = await Location.requestForegroundPermissionsAsync();
 
                 if (status !== 'granted') {
@@ -129,7 +135,7 @@ export function useWeather(customCity?: string): WeatherData {
                     return;
                 }
 
-                console.log('Weather: Fetching current position...');
+                debugWeather('Weather: Fetching current position...');
                 // Use a timeout to prevent hanging
                 const pos = await Promise.race([
                     Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
@@ -139,20 +145,20 @@ export function useWeather(customCity?: string): WeatherData {
                 if (!pos) throw new Error('Could not get position');
 
                 const { latitude, longitude } = pos.coords;
-                console.log(`Weather: Position found at ${latitude}, ${longitude}`);
+                debugWeather(`Weather: Position found at ${latitude}, ${longitude}`);
 
                 let city = customCity || 'My Location';
                 let districtForBMKG: string | null = null;
 
                 if (!customCity) {
                     try {
-                        console.log('Weather: Reverse geocoding for coords:', latitude, longitude);
+                        debugWeather('Weather: Reverse geocoding for coords:', latitude, longitude);
                         const geo = await Location.reverseGeocodeAsync({ latitude, longitude });
-                        console.log('Weather: Geocode result:', JSON.stringify(geo[0]));
+                        debugWeather('Weather: Geocode result:', JSON.stringify(geo[0]));
                         if (geo.length > 0) {
                             city = geo[0].city ?? geo[0].district ?? geo[0].region ?? 'My Location';
                             districtForBMKG = geo[0].district;
-                            console.log(`Weather: Best match city="${city}", district="${districtForBMKG}"`);
+                            debugWeather(`Weather: Best match city="${city}", district="${districtForBMKG}"`);
                         }
                     } catch (err) {
                         console.warn('Weather: Reverse geocode failed', err);

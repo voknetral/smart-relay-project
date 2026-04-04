@@ -1,5 +1,5 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
@@ -33,6 +33,7 @@ export function NotificationModal({
     notifications,
     onClearAll,
 }: NotificationModalProps) {
+    const { TXT } = useLanguage();
     const insets = useSafeAreaInsets();
     const formatTime = (date: Date) => {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

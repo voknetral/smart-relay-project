@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Platform } from 'react-native';
+import { LanguageProvider } from '@/contexts/LanguageContext';
 import { MqttProvider } from '@/contexts/MqttContext';
 
 export const unstable_settings = {
@@ -25,26 +26,28 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <MqttProvider>
-        <Stack>
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="settings"
-            options={{
-              headerShown: false,
-              animation: 'fade'
-            }}
-          />
-          <Stack.Screen
-            name="modal"
-            options={{
-              presentation: 'modal',
-              title: 'Modal',
-              animation: 'slide_from_bottom'
-            }}
-          />
-        </Stack>
-      </MqttProvider>
+      <LanguageProvider>
+        <MqttProvider>
+          <Stack>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="settings"
+              options={{
+                headerShown: false,
+                animation: 'fade'
+              }}
+            />
+            <Stack.Screen
+              name="modal"
+              options={{
+                presentation: 'modal',
+                title: 'Modal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+          </Stack>
+        </MqttProvider>
+      </LanguageProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

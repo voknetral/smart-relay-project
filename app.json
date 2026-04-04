@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "Anomali",
+    "name": "Smart Relay",
     "slug": "Anomali",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/smarthouse.png",
+    "icon": "./assets/images/house.png",
     "scheme": "anomali",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,7 +14,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#F8FAFC",
-        "foregroundImage": "./assets/images/smarthouse.png"
+        "foregroundImage": "./assets/images/house.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -32,15 +32,15 @@
       [
         "expo-location",
         {
-          "locationAlwaysPermission": "Allow Anomali to use your location for accurate weather data.",
+          "locationAlwaysPermission": "Allow Smart Relay to use your location for accurate weather data.",
           "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/smarthouse.png",
-          "imageWidth": 250,
+          "image": "./assets/images/house.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#F8FAFC",
           "dark": {

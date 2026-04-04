@@ -1,5 +1,5 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -21,6 +21,7 @@ export function WeatherStats({
     humidity = 60,
     windSpeed = 5,
 }: WeatherStatsProps) {
+    const { TXT } = useLanguage();
     const stats: StatItem[] = [
         { value: `${feelsLike}°`, label: TXT.common.feelsLike, iconName: 'thermometer-outline' },
         { value: `${humidity}%`, label: TXT.common.humidity, iconName: 'water-outline' },

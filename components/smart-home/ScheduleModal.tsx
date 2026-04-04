@@ -1,8 +1,9 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { Storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Modal,
     ScrollView,
@@ -23,6 +24,13 @@ export interface Schedule {
     endTime: string;   // HH:mm
     isEnabled: boolean;
     name?: string;
+}
+
+interface ScheduleTemplate {
+    id: string;
+    name: string;
+    startTime: string;
+    endTime: string;
 }
 
 interface ScheduleModalProps {
@@ -56,6 +64,7 @@ export function ScheduleModal({
     schedules,
     onUpdateSchedules,
 }: ScheduleModalProps) {
+    const { TXT } = useLanguage();
     const insets = useSafeAreaInsets();
     const [name, setName] = useState('');
     const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
@@ -63,10 +72,29 @@ export function ScheduleModal({
     const [endDateTime, setEndDateTime] = useState(new Date());
     const [showStartPicker, setShowStartPicker] = useState(false);
     const [showEndPicker, setShowEndPicker] = useState(false);
+    const [scheduleTemplates, setScheduleTemplates] = useState<ScheduleTemplate[]>([]);
 
     const formatTime = (date: Date) => {
         return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     };
+
+    const dateFromTime = (time: string) => {
+        const date = new Date();
+        const [hours, minutes] = time.split(':').map(Number);
+        date.setHours(hours, minutes, 0, 0);
+        return date;
+    };
+
+    useEffect(() => {
+        if (!visible) return;
+
+        const loadTemplates = async () => {
+            const templates = await Storage.loadScheduleTemplates();
+            setScheduleTemplates(templates);
+        };
+
+        loadTemplates();
+    }, [visible]);
 
     const onStartChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
         setShowStartPicker(false);
@@ -148,6 +176,43 @@ export function ScheduleModal({
         setName('');
     };
 
+    const saveCurrentAsTemplate = async () => {
+        const startStr = formatTime(startDateTime);
+        const endStr = formatTime(endDateTime);
+        const templateName = (name || `${startStr} - ${endStr}`).trim();
+
+        const nextTemplates: ScheduleTemplate[] = [
+            ...scheduleTemplates.filter((template) => template.name !== templateName),
+            {
+                id: Math.random().toString(36).slice(2, 11),
+                name: templateName,
+                startTime: startStr,
+                endTime: endStr,
+            },
+        ];
+
+        setScheduleTemplates(nextTemplates);
+        await Storage.saveScheduleTemplates(nextTemplates);
+
+        if (Platform.OS === 'web') {
+            window.alert(`Template "${templateName}" berhasil disimpan.`);
+        } else {
+            Alert.alert('Template Tersimpan', `Template "${templateName}" siap dipakai lagi.`);
+        }
+    };
+
+    const applyTemplate = (template: ScheduleTemplate) => {
+        setName(template.name);
+        setStartDateTime(dateFromTime(template.startTime));
+        setEndDateTime(dateFromTime(template.endTime));
+    };
+
+    const removeTemplate = async (templateId: string) => {
+        const nextTemplates = scheduleTemplates.filter((template) => template.id !== templateId);
+        setScheduleTemplates(nextTemplates);
+        await Storage.saveScheduleTemplates(nextTemplates);
+    };
+
     const removeSchedule = (id: string) => {
         onUpdateSchedules(schedules.filter((s) => s.id !== id));
     };
@@ -199,6 +264,41 @@ export function ScheduleModal({
                     </View>
 
                     <ScrollView style={styles.list}>
+                        {scheduleTemplates.length > 0 && (
+                            <View style={styles.templateSection}>
+                                <View style={styles.templateHeader}>
+                                    <Text style={styles.templateTitle}>Template Jadwal</Text>
+                                    <Text style={styles.templateSubtitle}>Pakai ulang tanpa buat dari awal</Text>
+                                </View>
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.templateRow}
+                                >
+                                    {scheduleTemplates.map((template) => (
+                                        <TouchableOpacity
+                                            key={template.id}
+                                            style={styles.templateChip}
+                                            onPress={() => applyTemplate(template)}
+                                        >
+                                            <View style={styles.templateChipContent}>
+                                                <Text style={styles.templateChipName}>{template.name}</Text>
+                                                <Text style={styles.templateChipTime}>
+                                                    {template.startTime} - {template.endTime}
+                                                </Text>
+                                            </View>
+                                            <TouchableOpacity
+                                                onPress={() => removeTemplate(template.id)}
+                                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                            >
+                                                <Ionicons name="close" size={16} color={SmartHomeColors.textMuted} />
+                                            </TouchableOpacity>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
+
                         {schedules.length === 0 ? (
                             <Text style={styles.emptyText}>{TXT.device.noSchedules}</Text>
                         ) : (
@@ -284,6 +384,11 @@ export function ScheduleModal({
                             <Ionicons name={editingScheduleId ? "checkmark" : "add"} size={24} color="#FFF" />
                             <Text style={styles.addBtnText}>{editingScheduleId ? TXT.common.save : TXT.device.addSchedule}</Text>
                         </TouchableOpacity>
+
+                        <TouchableOpacity onPress={saveCurrentAsTemplate} style={styles.templateSaveBtn}>
+                            <Ionicons name="bookmark-outline" size={18} color={SmartHomeColors.purple} />
+                            <Text style={styles.templateSaveText}>Simpan sebagai template</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </View>
@@ -353,6 +458,55 @@ const styles = StyleSheet.create({
     list: {
         marginBottom: 20,
         paddingBottom: 20,
+    },
+    templateSection: {
+        marginBottom: 18,
+        gap: 10,
+    },
+    templateHeader: {
+        gap: 2,
+    },
+    templateTitle: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: SmartHomeColors.textSecondary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    templateSubtitle: {
+        fontSize: 12,
+        color: SmartHomeColors.textMuted,
+    },
+    templateRow: {
+        gap: 10,
+        paddingRight: 16,
+    },
+    templateChip: {
+        minWidth: 180,
+        backgroundColor: '#FFF',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    templateChipContent: {
+        flex: 1,
+        gap: 4,
+    },
+    templateChipName: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: SmartHomeColors.textPrimary,
+    },
+    templateChipTime: {
+        fontSize: 12,
+        color: SmartHomeColors.textMuted,
+        fontWeight: '600',
     },
     emptyText: {
         textAlign: 'center',
@@ -536,5 +690,22 @@ const styles = StyleSheet.create({
         color: '#FFF',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
+    },
+    templateSaveBtn: {
+        marginTop: 12,
+        height: 46,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#D8B4FE',
+        backgroundColor: '#F8F4FF',
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+    },
+    templateSaveText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: SmartHomeColors.purple,
     },
 });

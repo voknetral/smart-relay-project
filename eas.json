@@ -1,6 +1,7 @@
 {
     "cli": {
-        "version": ">= 5.9.1"
+        "version": ">= 5.9.1",
+        "appVersionSource": "remote"
     },
     "build": {
         "development": {
@@ -10,10 +11,15 @@
         "preview": {
             "distribution": "internal",
             "android": {
-                "buildType": "apk"
+                "buildType": "apk",
+                "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=armeabi-v7a"
             }
         },
-        "production": {}
+        "production": {
+            "android": {
+                "gradleCommand": ":app:bundleRelease -PreactNativeArchitectures=armeabi-v7a"
+            }
+        }
     },
     "submit": {
         "production": {}

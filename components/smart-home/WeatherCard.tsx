@@ -1,5 +1,5 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -236,6 +236,7 @@ export function WeatherCard({
     city = 'My Location',
     loading = false,
 }: WeatherCardProps) {
+    const { TXT } = useLanguage();
     const Illustration = ICON_MAP[iconName] ?? PartlySunnyIllustration;
 
     return (

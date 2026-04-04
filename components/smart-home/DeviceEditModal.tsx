@@ -1,15 +1,12 @@
 import { DeviceIconName } from '@/components/smart-home/DeviceCard';
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    Image,
     KeyboardAvoidingView,
     Modal,
     Platform,
-    Pressable,
     ScrollView,
     StyleSheet,
     Text,
@@ -25,61 +22,55 @@ const ICONS: { type: DeviceIconName; label: string; icon: string }[] = [
     { type: 'light', label: 'Lampu', icon: 'bulb' },
     { type: 'fan', label: 'Kipas', icon: 'aperture' },
     { type: 'ac', label: 'AC', icon: 'snow' },
+    { type: 'tv', label: 'TV', icon: 'tv' },
+    { type: 'speaker', label: 'Speaker', icon: 'volume-high' },
+    { type: 'coffee', label: 'Coffee', icon: 'cafe' },
+    { type: 'lock', label: 'Lock', icon: 'lock-closed' },
+    { type: 'camera', label: 'Kamera', icon: 'videocam' },
+    { type: 'wifi', label: 'Router', icon: 'wifi' },
+    { type: 'water', label: 'Pompa', icon: 'water-outline' },
+    { type: 'flame', label: 'Heater', icon: 'flame' },
+    { type: 'car', label: 'Garasi', icon: 'car-sport' },
 ];
 
 interface DeviceEditModalProps {
     visible: boolean;
     onClose: () => void;
+    deviceId: string;
     deviceName: string;
     deviceIcon: DeviceIconName;
-    customIconUri?: string;
-    onSave: (newName: string, newIcon: DeviceIconName, customIconUri?: string) => void;
+    onSave: (newName: string, newIcon: DeviceIconName) => void;
     onDelete?: () => void;
 }
 
 export function DeviceEditModal({
     visible,
     onClose,
+    deviceId,
     deviceName,
     deviceIcon,
-    customIconUri,
     onSave,
     onDelete,
 }: DeviceEditModalProps) {
+    const { TXT } = useLanguage();
     const insets = useSafeAreaInsets();
     const [name, setName] = useState(deviceName);
     const [selectedIcon, setSelectedIcon] = useState<DeviceIconName>(deviceIcon);
-    const [selectedCustomIcon, setSelectedCustomIcon] = useState<string | undefined>(customIconUri);
+    const prevVisibleRef = useRef(false);
 
-    // Sync state if props change while visible
+    // Sync state only when modal is opened or when switching to another device.
     useEffect(() => {
-        if (visible) {
+        const becameVisible = visible && !prevVisibleRef.current;
+        if (becameVisible) {
             setName(deviceName);
             setSelectedIcon(deviceIcon);
-            setSelectedCustomIcon(customIconUri);
         }
-    }, [visible, deviceName, deviceIcon, customIconUri]);
-
-    const pickImage = async () => {
-        try {
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [1, 1],
-                quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets && result.assets[0]) {
-                setSelectedCustomIcon(result.assets[0].uri);
-            }
-        } catch (error) {
-            console.error('Error picking image:', error);
-        }
-    };
+        prevVisibleRef.current = visible;
+    }, [visible, deviceId, deviceName, deviceIcon]);
 
     const handleSave = () => {
         if (!name.trim()) return;
-        onSave(name.trim(), selectedIcon, selectedCustomIcon);
+        onSave(name.trim(), selectedIcon);
         onClose();
     };
 
@@ -93,101 +84,85 @@ export function DeviceEditModal({
         >
             <View style={styles.overlay}>
                 <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={[styles.modalContent, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 24) }]}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    keyboardVerticalOffset={Math.max(insets.top, 12)}
+                    style={styles.keyboardAvoiding}
                 >
-                    <View style={styles.header}>
-                        <TouchableOpacity onPress={onClose} style={styles.headerBackBtn}>
-                            <Ionicons name="chevron-back" size={28} color={SmartHomeColors.textPrimary} />
-                        </TouchableOpacity>
-                        <View style={styles.headerTitleContainer}>
-                            <Text style={styles.title} numberOfLines={1}>{TXT.device.editDevice}</Text>
-                        </View>
-                        <View style={{ width: 40 }} />
-                    </View>
-
-                    <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>{TXT.device.deviceName}</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={name}
-                                onChangeText={setName}
-                                placeholder="e.g. Living Room Lamp"
-                                placeholderTextColor={SmartHomeColors.textMuted}
-                            />
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>{TXT.device.customIcon}</Text>
-                            <View style={styles.customIconContainer}>
-                                {selectedCustomIcon ? (
-                                    <View style={styles.previewWrapper}>
-                                        <Image source={{ uri: selectedCustomIcon }} style={styles.previewImage} />
-                                        <TouchableOpacity
-                                            style={styles.removeCustomBtn}
-                                            onPress={() => setSelectedCustomIcon(undefined)}
-                                        >
-                                            <Ionicons name="close-circle" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
-                                    </View>
-                                ) : (
-                                    <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
-                                        <Ionicons name="image-outline" size={24} color={SmartHomeColors.purple} />
-                                        <Text style={styles.uploadText}>{TXT.device.uploadIcon}</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>{TXT.device.deviceIcon}</Text>
-                            <View style={styles.iconGrid}>
-                                {ICONS.map((item) => (
-                                    <TouchableOpacity
-                                        key={item.type}
-                                        style={[
-                                            styles.iconOption,
-                                            !selectedCustomIcon && selectedIcon === item.type && styles.iconOptionActive,
-                                        ]}
-                                        onPress={() => {
-                                            setSelectedIcon(item.type);
-                                            setSelectedCustomIcon(undefined);
-                                        }}
-                                    >
-                                        <Ionicons
-                                            name={(!selectedCustomIcon && selectedIcon === item.type ? item.icon : `${item.icon}-outline`) as any}
-                                            size={32}
-                                            color={!selectedCustomIcon && selectedIcon === item.type ? '#FFF' : SmartHomeColors.textPrimary}
-                                        />
-                                    </TouchableOpacity>
-                                ))}
-                                {ICONS.length % 3 !== 0 && Array.from({ length: 3 - (ICONS.length % 3) }).map((_, i) => (
-                                    <View key={`dummy-${i}`} style={{ width: '31%' }} />
-                                ))}
-                            </View>
-                        </View>
-
-                    </ScrollView>
-
-                    <View style={styles.bottomSection}>
-                        {onDelete && (
-                            <TouchableOpacity style={styles.deleteZone} onPress={onDelete}>
-                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                <Text style={styles.deleteText}>Hapus Perangkat</Text>
+                    <View style={[styles.modalContent, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 24) }]}>
+                        <View style={styles.header}>
+                            <TouchableOpacity onPress={onClose} style={styles.headerBackBtn}>
+                                <Ionicons name="chevron-back" size={28} color={SmartHomeColors.textPrimary} />
                             </TouchableOpacity>
-                        )}
-                        <View style={styles.footer}>
-                            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-                            <Text style={styles.cancelText}>{TXT.common.cancel}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.saveBtn, !name.trim() && styles.saveBtnDisabled]}
-                            onPress={handleSave}
-                            disabled={!name.trim()}
+                            <View style={styles.headerTitleContainer}>
+                                <Text style={styles.title} numberOfLines={1}>{TXT.device.editDevice}</Text>
+                            </View>
+                            <View style={{ width: 40 }} />
+                        </View>
+
+                        <ScrollView
+                            style={styles.body}
+                            contentContainerStyle={styles.bodyContent}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
                         >
-                            <Text style={styles.saveText}>{TXT.device.saveChanges}</Text>
-                        </TouchableOpacity>
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>{TXT.device.deviceName}</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={name}
+                                    onChangeText={setName}
+                                    placeholder="e.g. Living Room Lamp"
+                                    placeholderTextColor={SmartHomeColors.textMuted}
+                                />
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.label}>{TXT.device.deviceIcon}</Text>
+                                <View style={styles.iconGrid}>
+                                    {ICONS.map((item) => (
+                                        <TouchableOpacity
+                                            key={item.type}
+                                            style={[
+                                                styles.iconOption,
+                                                selectedIcon === item.type && styles.iconOptionActive,
+                                            ]}
+                                            onPress={() => {
+                                                setSelectedIcon(item.type);
+                                            }}
+                                        >
+                                            <Ionicons
+                                                name={(selectedIcon === item.type ? item.icon : `${item.icon}-outline`) as any}
+                                                size={32}
+                                                color={selectedIcon === item.type ? '#FFF' : SmartHomeColors.textPrimary}
+                                            />
+                                        </TouchableOpacity>
+                                    ))}
+                                    {ICONS.length % 3 !== 0 && Array.from({ length: 3 - (ICONS.length % 3) }).map((_, i) => (
+                                        <View key={`dummy-${i}`} style={{ width: '31%' }} />
+                                    ))}
+                                </View>
+                            </View>
+                        </ScrollView>
+
+                        <View style={styles.bottomSection}>
+                            {onDelete && (
+                                <TouchableOpacity style={styles.deleteZone} onPress={onDelete}>
+                                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                    <Text style={styles.deleteText}>Hapus Perangkat</Text>
+                                </TouchableOpacity>
+                            )}
+                            <View style={styles.footer}>
+                                <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+                                    <Text style={styles.cancelText}>{TXT.common.cancel}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.saveBtn, !name.trim() && styles.saveBtnDisabled]}
+                                    onPress={handleSave}
+                                    disabled={!name.trim()}
+                                >
+                                    <Text style={styles.saveText}>{TXT.device.saveChanges}</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     </View>
                 </KeyboardAvoidingView>
@@ -202,13 +177,15 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(15, 23, 42, 0.6)',
         justifyContent: 'flex-end',
     },
-    backdrop: {
-        ...StyleSheet.absoluteFillObject,
+    keyboardAvoiding: {
+        flex: 1,
     },
     modalContent: {
         backgroundColor: SmartHomeColors.cardBg,
         padding: 24,
         flex: 1,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
     },
     header: {
         flexDirection: 'row',
@@ -242,6 +219,9 @@ const styles = StyleSheet.create({
         flex: 1,
         marginBottom: 20,
     },
+    bodyContent: {
+        paddingBottom: 8,
+    },
     inputGroup: {
         marginBottom: 20,
     },
@@ -260,43 +240,6 @@ const styles = StyleSheet.create({
         color: SmartHomeColors.textPrimary,
         borderWidth: 1,
         borderColor: '#E2E8F0',
-    },
-    customIconContainer: {
-        marginBottom: 10,
-    },
-    uploadBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(139, 92, 246, 0.05)',
-        borderWidth: 1,
-        borderStyle: 'dashed',
-        borderColor: SmartHomeColors.purple,
-        borderRadius: 12,
-        padding: 15,
-        gap: 10,
-    },
-    uploadText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: SmartHomeColors.purple,
-    },
-    previewWrapper: {
-        width: 80,
-        height: 80,
-        borderRadius: 20,
-        overflow: 'visible',
-    },
-    previewImage: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 20,
-    },
-    removeCustomBtn: {
-        position: 'absolute',
-        top: -8,
-        right: -8,
-        backgroundColor: '#FFF',
-        borderRadius: 12,
     },
     iconGrid: {
         flexDirection: 'row',

@@ -1,4 +1,5 @@
 import { APP_DEFAULTS } from '@/constants/Config';
+import { AppLanguage } from '@/constants/translations';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
@@ -9,18 +10,21 @@ const WEB_STORAGE_KEY = 'anomali_app_config';
 export interface AppConfig {
     username: string;
     city?: string;
+    language?: AppLanguage;
     isSetupComplete: boolean;
     mqttTopic?: string;
     mqttHost?: string;
     mqttPort?: string;
     deviceSettings?: Record<string, { name: string; iconType: string; customIconUri?: string }>;
-    customDevices?: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string }[];
+    customDevices?: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string; isHardwareVerified?: boolean }[];
+    scheduleTemplates?: { id: string; name: string; startTime: string; endTime: string }[];
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
     ...APP_DEFAULTS,
     isSetupComplete: false,
     deviceSettings: {},
+    scheduleTemplates: [],
 };
 
 export const Storage = {
@@ -99,7 +103,7 @@ export const Storage = {
         await this.saveConfig(updatedConfig);
     },
 
-    async saveCustomDevices(devices: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string }[]): Promise<void> {
+    async saveCustomDevices(devices: { id: string; name: string; iconType: string; customIconUri?: string; accentColor: string; isHardwareVerified?: boolean }[]): Promise<void> {
         const config = await this.loadConfig();
         if (!config) return;
 
@@ -108,6 +112,22 @@ export const Storage = {
             customDevices: devices,
         };
         await this.saveConfig(updatedConfig);
+    },
+
+    async saveScheduleTemplates(templates: { id: string; name: string; startTime: string; endTime: string }[]): Promise<void> {
+        const config = await this.loadConfig();
+        if (!config) return;
+
+        const updatedConfig = {
+            ...config,
+            scheduleTemplates: templates,
+        };
+        await this.saveConfig(updatedConfig);
+    },
+
+    async loadScheduleTemplates(): Promise<{ id: string; name: string; startTime: string; endTime: string }[]> {
+        const config = await this.loadConfig();
+        return config?.scheduleTemplates || [];
     }
 };
 

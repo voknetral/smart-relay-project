@@ -38,18 +38,20 @@ struct Device {
   String topic_mode_set;
   String topic_mode_state;
   String topic_availability;
+  String topic_verify;
 };
 
-Device devices[] = {{"1", RELAY_PIN_1, "", "", "", "", ""},
-                    {"2", RELAY_PIN_2, "", "", "", "", ""},
-                    {"3", RELAY_PIN_3, "", "", "", "", ""},
-                    {"4", RELAY_PIN_4, "", "", "", "", ""}};
+Device devices[] = {{"1", RELAY_PIN_1, "", "", "", "", "", ""},
+                    {"2", RELAY_PIN_2, "", "", "", "", "", ""},
+                    {"3", RELAY_PIN_3, "", "", "", "", "", ""},
+                    {"4", RELAY_PIN_4, "", "", "", "", "", ""}};
 
 const int NUM_DEVICES = sizeof(devices) / sizeof(Device);
 
 // Dynamic Shared Topics
 String availabilityTopic;
 String getTopic;
+String verifyTopic;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -58,6 +60,8 @@ Preferences preferences;
 // State tracking
 int last_minute_triggered = -1;
 unsigned long last_reconnect_attempt = 0;
+unsigned long last_manual_command_ms[NUM_DEVICES] = {0};
+const unsigned long COMMAND_DEBOUNCE_MS = 500;
 
 void setup_wifi() {
   Serial.println("\nConnecting to WiFi...");
@@ -98,8 +102,33 @@ void callback(char *topic, byte *payload, unsigned int length) {
   for (int i = 0; i < length; i++)
     message += (char)payload[i];
 
+  if (String(topic) == getTopic) {
+    for (int j = 0; j < NUM_DEVICES; j++) {
+      client.publish(devices[j].topic_state.c_str(),
+                     (digitalRead(devices[j].pin) == RELAY_ON) ? "ON" : "OFF",
+                     true);
+      client.publish(devices[j].topic_mode_state.c_str(), loadMode(j).c_str(),
+                     true);
+      client.publish(devices[j].topic_availability.c_str(), "online", true);
+    }
+    return;
+  }
+
+  if (String(topic) == verifyTopic) {
+    for (int j = 0; j < NUM_DEVICES; j++) {
+      client.publish(devices[j].topic_verify.c_str(), message.c_str(), false);
+    }
+    return;
+  }
+
   for (int i = 0; i < NUM_DEVICES; i++) {
     if (String(topic) == devices[i].topic_set) {
+      unsigned long now = millis();
+      if (now - last_manual_command_ms[i] < COMMAND_DEBOUNCE_MS) {
+        return;
+      }
+      last_manual_command_ms[i] = now;
+
       bool newState = (message == "ON");
       digitalWrite(devices[i].pin, newState ? RELAY_ON : RELAY_OFF);
       client.publish(devices[i].topic_state.c_str(), newState ? "ON" : "OFF",
@@ -113,17 +142,6 @@ void callback(char *topic, byte *payload, unsigned int length) {
         saveMode(i, message);
         client.publish(devices[i].topic_mode_state.c_str(), message.c_str(),
                        true);
-      }
-      break;
-    } else if (String(topic) == getTopic) {
-      // Sync all device states
-      for (int j = 0; j < NUM_DEVICES; j++) {
-        client.publish(devices[j].topic_state.c_str(),
-                       (digitalRead(devices[j].pin) == RELAY_ON) ? "ON" : "OFF",
-                       true);
-        client.publish(devices[j].topic_mode_state.c_str(), loadMode(j).c_str(),
-                       true);
-        client.publish(devices[j].topic_availability.c_str(), "online", true);
       }
       break;
     }
@@ -158,6 +176,7 @@ boolean reconnect() {
       client.subscribe(devices[i].topic_availability.c_str());
     }
     client.subscribe(getTopic.c_str());
+    client.subscribe(verifyTopic.c_str());
 
     // Sync current state back to app on initial connection
     for (int i = 0; i < NUM_DEVICES; i++) {
@@ -224,6 +243,7 @@ void setup() {
   // Initialize topics dynamically
   availabilityTopic = String(base_topic) + "/availability";
   getTopic = String(base_topic) + "/get";
+  verifyTopic = String(base_topic) + "/verify";
 
   for (int i = 0; i < NUM_DEVICES; i++) {
     String deviceBase = String(base_topic) + "/" + String(devices[i].id);
@@ -233,6 +253,7 @@ void setup() {
     devices[i].topic_mode_set = deviceBase + "/mode/set";
     devices[i].topic_mode_state = deviceBase + "/mode/state";
     devices[i].topic_availability = deviceBase + "/availability";
+    devices[i].topic_verify = deviceBase + "/verify";
 
     pinMode(devices[i].pin, OUTPUT);
     digitalWrite(devices[i].pin, RELAY_OFF);

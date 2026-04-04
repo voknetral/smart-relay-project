@@ -1,5 +1,5 @@
 import { SmartHomeColors } from '@/constants/theme';
-import { TXT } from '@/constants/translations';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,6 +18,7 @@ interface SetupScreenProps {
 }
 
 export function SetupScreen({ onComplete }: SetupScreenProps) {
+    const { TXT } = useLanguage();
     const [name, setName] = useState('');
     const [loading, setLoading] = useState(false);
 
