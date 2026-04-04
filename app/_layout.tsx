@@ -37,14 +37,6 @@ export default function RootLayout() {
                 animation: 'fade'
               }}
             />
-            <Stack.Screen
-              name="modal"
-              options={{
-                presentation: 'modal',
-                title: 'Modal',
-                animation: 'slide_from_bottom'
-              }}
-            />
           </Stack>
         </MqttProvider>
       </LanguageProvider>
