@@ -1,4 +1,4 @@
-# 🔧 Menambahkan Perangkat (Relay) pada ESP32
+# Menambahkan Perangkat (Relay) pada ESP32
 
 Aplikasi React Native mendukung penambahan perangkat (card) tanpa batas.
 Setiap perangkat baru akan otomatis mendapatkan ID berurutan (`5`, `6`, `7`, dan seterusnya).
