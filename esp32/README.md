@@ -1,42 +1,75 @@
-Kini aplikasi React Native Anda telah mendukung penambahan "Perangkat/Card" tanpa batas! Setiap Anda menekan tombol **Tambah Perangkat** di aplikasi, ia secara otomatis akan membuat ID yang berurutan, mulai dari `5`, `6`, `7`, dan seterusnya.
+# 🔧 Menambahkan Perangkat (Relay) pada ESP32
 
-Karena kode MCU (ESP32) awalnya disiapkan hanya untuk 4 relay, Anda perlu menyelaraskan kodenya agar ESP32 bisa "mendengar" instruksi dari perangkat baru tersebut.
+Aplikasi React Native mendukung penambahan perangkat (card) tanpa batas.
+Setiap perangkat baru akan otomatis mendapatkan ID berurutan (`5`, `6`, `7`, dan seterusnya).
 
-Ikuti panduan berikut setiap kali Anda menambah *Card* baru di Aplikasi:
+Agar ESP32 dapat mengontrol perangkat baru tersebut, perlu dilakukan penambahan sedikit di kode firmware.
 
-## Langkah 1: Sambungkan GPIO Baru
-Tentukan Pin GPIO di ESP32 yang akan Anda gunakan untuk menyambungkan sambungan sinyal Relay baru.
-Buka `esp32_mqtt.ino` dan tambahkan definisinya di bagian atas:
+---
 
-```cpp
+## Langkah 1: Menentukan GPIO Baru
+
+Pilih pin GPIO yang tersedia pada ESP32 untuk relay baru, lalu tambahkan di file `esp32_mqtt.ino`:
+
+```cpp id="b0u6jk"
 // Relay Pins Definition
 #define RELAY_PIN_1 16
 #define RELAY_PIN_2 17
 #define RELAY_PIN_3 18
 #define RELAY_PIN_4 19
-// -- TAMBAHAN ANDA --
-#define RELAY_PIN_5 21 // Contoh menggunakan GPIO 21
+
+// Relay tambahan
+#define RELAY_PIN_5 21
 ```
 
-## Langkah 2: Daftarkan ke Array Devices
-Cari blok deklarasi `Device devices[] = {...}` dan tambahkan baris baru untuk ID "5" (atau nomor berapapun yang baru Anda buat di aplikasi).
+> Pastikan GPIO yang digunakan tidak bentrok dengan pin lain atau pin khusus (boot/flash).
 
-```cpp
+---
+
+## Langkah 2: Mendaftarkan Perangkat
+
+Cari bagian deklarasi `Device devices[]`, lalu tambahkan device baru sesuai ID dari aplikasi:
+
+```cpp id="z9l7u0"
 Device devices[] = {
   {"1", RELAY_PIN_1, "", "", "", "", ""},
   {"2", RELAY_PIN_2, "", "", "", "", ""},
   {"3", RELAY_PIN_3, "", "", "", "", ""},
   {"4", RELAY_PIN_4, "", "", "", "", ""},
-  // -- TAMBAHAN ANDA --
-  {"5", RELAY_PIN_5, "", "", "", "", ""}
+  {"5", RELAY_PIN_5, "", "", "", "", ""} // misal mau tambah relay 5 dengan id 5
 };
 ```
 
-## Langkah Mulus Tanpa Ubah Logika
-Cukup dua langkah di atas! Karena sistem `loop()` maupun `setup()` dibuat secara dinamis, ESP32 akan langsung beradaptasi dengan perubahan array `devices[]` ini:
-1. Membuka topik MQTT baru untuk ID `7`.
-2. Melakukan sinkronisasi otomatis (*availability* dan *get_state*) ke react native untuk relay ke-7.
-3. Mengaplikasikan jadwal (timer lokal NVS) secara mandiri untuk alat baru tanpa mengganggu alat lama.
+---
 
-## Catatan
-Aplikasi hanya akan memberikan notifikasi dan UI memudar ("OFFLINE") pada spesifik perangkat yang koneksi MQTT-nya terputus/offline dari Broker Utama HiveMQ. Jika status keseluruhan ESP32 offline, maka seluruh Card di aplikasi akan berwarna abu-abu redup untuk menghindari eksekusi perintah yang tidak dikirim.
+## Cara Kerja
+
+Tidak diperlukan perubahan tambahan pada kode utama.
+
+Sistem akan secara otomatis menyesuaikan berdasarkan isi array `devices[]`:
+
+* Subscribe ke topik MQTT baru
+* Sinkronisasi status perangkat ke aplikasi
+* Menjalankan timer dan jadwal secara mandiri untuk setiap perangkat
+
+---
+
+## Perilaku Aplikasi
+
+* Jika card baru belum diprogram di firmware → card tersebut akan ditandai offline
+* Jika ESP32 terputus dari MQTT → semua perangkat ditandai offline
+
+Hal ini untuk mencegah pengiriman perintah saat koneksi tidak tersedia.
+
+---
+
+## Ringkasan
+
+Untuk menambahkan perangkat baru:
+
+1. Tambahkan definisi GPIO
+2. Tambahkan ke array `devices[]`
+
+Tidak perlu mengubah fungsi utama seperti `setup()` atau `loop()`.
+
+---
