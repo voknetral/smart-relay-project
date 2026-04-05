@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "Smart Relay",
-    "slug": "Anomali",
+    "slug": "voknetral",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/house.png",
-    "scheme": "anomali",
+    "scheme": "voknetral",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -18,9 +18,13 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.zeninkite.Anomali",
+      "package": "com.zeninkite.voknetral",
       "permissions": [
-        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -57,8 +61,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a58169ec-01f8-4a7a-b4db-377da9a0bb01"
+        "projectId": "4dc38014-21ac-4929-93b6-a5265b397183"
       }
-    }
+    },
+    "owner": "zeninkite"
   }
 }

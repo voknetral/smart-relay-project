@@ -11,7 +11,9 @@ const char *password = "selamatdatang";
 // MQTT Configuration
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
-const char *base_topic = "anomali/device"; // Base topic for all devices
+const char *base_topic = "voknetral/device"; // Base topic for all devices
+const char *prefs_namespace = "voknetral";
+const char *legacy_prefs_namespace = "anomali";
 
 // Relay Pins Definition
 #define RELAY_PIN_1 12
@@ -68,33 +70,49 @@ void setup_wifi() {
   WiFi.begin(ssid, password);
 }
 
-void saveSchedules(int deviceIdx, String json) {
-  preferences.begin("anomali", false);
-  preferences.putString(("sch_" + String(devices[deviceIdx].id)).c_str(), json);
+void savePreferenceValue(const String &key, const String &value) {
+  preferences.begin(prefs_namespace, false);
+  preferences.putString(key.c_str(), value);
   preferences.end();
+}
+
+String loadPreferenceValue(const String &key, const char *defaultValue) {
+  preferences.begin(prefs_namespace, true);
+  bool existsInCurrentNamespace = preferences.isKey(key.c_str());
+  String value = preferences.getString(key.c_str(), defaultValue);
+  preferences.end();
+
+  if (existsInCurrentNamespace) {
+    return value;
+  }
+
+  preferences.begin(legacy_prefs_namespace, true);
+  bool existsInLegacyNamespace = preferences.isKey(key.c_str());
+  String legacyValue = preferences.getString(key.c_str(), defaultValue);
+  preferences.end();
+
+  if (!existsInLegacyNamespace) {
+    return defaultValue;
+  }
+
+  savePreferenceValue(key, legacyValue);
+  return legacyValue;
+}
+
+void saveSchedules(int deviceIdx, String json) {
+  savePreferenceValue("sch_" + String(devices[deviceIdx].id), json);
 }
 
 String loadSchedules(int deviceIdx) {
-  preferences.begin("anomali", true);
-  String json = preferences.getString(
-      ("sch_" + String(devices[deviceIdx].id)).c_str(), "[]");
-  preferences.end();
-  return json;
+  return loadPreferenceValue("sch_" + String(devices[deviceIdx].id), "[]");
 }
 
 void saveMode(int deviceIdx, String mode) {
-  preferences.begin("anomali", false);
-  preferences.putString(("mode_" + String(devices[deviceIdx].id)).c_str(),
-                        mode);
-  preferences.end();
+  savePreferenceValue("mode_" + String(devices[deviceIdx].id), mode);
 }
 
 String loadMode(int deviceIdx) {
-  preferences.begin("anomali", true);
-  String mode = preferences.getString(
-      ("mode_" + String(devices[deviceIdx].id)).c_str(), "auto");
-  preferences.end();
-  return mode;
+  return loadPreferenceValue("mode_" + String(devices[deviceIdx].id), "manual");
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
@@ -165,7 +183,7 @@ bool isTimeInRange(const char* startStr, const char* endStr, int currentMins) {
 }
 
 boolean reconnect() {
-  String clientId = "Anomali-MCU-" + String(random(0xffff), HEX);
+  String clientId = "Voknetral-MCU-" + String(random(0xffff), HEX);
   if (client.connect(clientId.c_str(), availabilityTopic.c_str(), 0, true,
                      "offline")) {
     client.publish(availabilityTopic.c_str(), "online", true);

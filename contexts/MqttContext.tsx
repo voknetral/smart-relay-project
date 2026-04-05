@@ -32,6 +32,7 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
     const [mcuOnline, setMcuOnline] = useState(false);
     const clientRef = useRef<mqtt.MqttClient | null>(null);
     const previousAvailabilityTopicRef = useRef(`${APP_DEFAULTS.mqttTopic}/availability`);
+    const mqttTopicRef = useRef(APP_DEFAULTS.mqttTopic);
     const appStateRef = useRef<AppStateStatus>(AppState.currentState);
     const clientIdRef = useRef(`smart-relay-${Math.random().toString(16).slice(2, 10)}`);
     const currentBrokerUrlRef = useRef<string | null>(null);
@@ -56,6 +57,26 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
         }
 
         return `${protocol}://${normalizedHost}:${normalizedPort}/mqtt`;
+    }, []);
+
+    const updateAvailabilitySubscription = useCallback((topic: string) => {
+        const client = clientRef.current;
+        const nextAvailabilityTopic = `${topic}/availability`;
+        const previousAvailabilityTopic = previousAvailabilityTopicRef.current;
+
+        if (!client || !client.connected) {
+            previousAvailabilityTopicRef.current = nextAvailabilityTopic;
+            setMcuOnline(false);
+            return;
+        }
+
+        if (previousAvailabilityTopic !== nextAvailabilityTopic) {
+            client.unsubscribe(previousAvailabilityTopic);
+        }
+
+        client.subscribe(nextAvailabilityTopic);
+        previousAvailabilityTopicRef.current = nextAvailabilityTopic;
+        setMcuOnline(false);
     }, []);
 
     // Initial load from storage
@@ -109,10 +130,7 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
                 debugLog('Global MQTT Connected');
                 currentBrokerUrlRef.current = brokerUrl;
                 setState({ connected: true, error: null });
-                // Subscribe to availability once connected
-                const availabilityTopic = `${topic}/availability`;
-                previousAvailabilityTopicRef.current = availabilityTopic;
-                client.subscribe(availabilityTopic);
+                updateAvailabilitySubscription(topic);
             });
 
             client.on('message', (topic, payload) => {
@@ -136,24 +154,34 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
             client.on('close', () => {
                 setState((prev) => ({ ...prev, connected: false }));
                 setMcuOnline(false); // If MQTT is closed, assume MCU is offline
+                currentBrokerUrlRef.current = null;
             });
 
             clientRef.current = client;
         } catch (err: any) {
             setState({ connected: false, error: err.message });
         }
-    }, [resolveBrokerUrl]);
+    }, [resolveBrokerUrl, updateAvailabilitySubscription]);
 
     useEffect(() => {
         if (remoteHost && remotePort) {
-            doConnect(remoteHost, remotePort, mqttTopic);
+            doConnect(remoteHost, remotePort, mqttTopicRef.current);
         }
+    }, [remoteHost, remotePort, doConnect]);
+
+    useEffect(() => {
         return () => {
             if (clientRef.current) {
                 clientRef.current.end(true);
+                clientRef.current = null;
             }
         };
-    }, [remoteHost, remotePort, mqttTopic, doConnect]);
+    }, []);
+
+    useEffect(() => {
+        mqttTopicRef.current = mqttTopic;
+        updateAvailabilitySubscription(mqttTopic);
+    }, [mqttTopic, updateAvailabilitySubscription]);
 
     useEffect(() => {
         const subscription = AppState.addEventListener('change', (nextState) => {
@@ -167,14 +195,14 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
                 remoteHost &&
                 remotePort
             ) {
-                doConnect(remoteHost, remotePort, mqttTopic);
+                doConnect(remoteHost, remotePort, mqttTopicRef.current);
             }
         });
 
         return () => {
             subscription.remove();
         };
-    }, [doConnect, mqttTopic, remoteHost, remotePort]);
+    }, [doConnect, remoteHost, remotePort]);
 
     const subscribe = useCallback((topic: string) => {
         if (clientRef.current && state.connected) {
@@ -210,23 +238,16 @@ export function MqttProvider({ children }: { children: React.ReactNode }) {
         const topicChanged = normalizedTopic !== mqttTopic;
 
         if (topicChanged) {
-            const nextAvailabilityTopic = `${normalizedTopic}/availability`;
-            const previousAvailabilityTopic = previousAvailabilityTopicRef.current;
-
             setMqttTopic(normalizedTopic);
-
-            if (clientRef.current && state.connected) {
-                if (previousAvailabilityTopic !== nextAvailabilityTopic) {
-                    clientRef.current.unsubscribe(previousAvailabilityTopic);
-                }
-                clientRef.current.subscribe(nextAvailabilityTopic);
-                previousAvailabilityTopicRef.current = nextAvailabilityTopic;
-            }
         }
 
         if (hostChanged) setRemoteHost(normalizedHost);
         if (portChanged) setRemotePort(normalizedPort);
-    }, [mqttTopic, remoteHost, remotePort, state.connected]);
+
+        if (!hostChanged && !portChanged && !clientRef.current && normalizedHost && normalizedPort) {
+            doConnect(normalizedHost, normalizedPort, normalizedTopic);
+        }
+    }, [doConnect, mqttTopic, remoteHost, remotePort]);
 
     return (
         <MqttContext.Provider value={{ ...state, subscribe, publish, onMessage, reconnect, mcuOnline, mqttTopic }}>

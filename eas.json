@@ -1,27 +1,30 @@
 {
-    "cli": {
-        "version": ">= 5.9.1",
-        "appVersionSource": "remote"
+  "cli": {
+    "version": ">= 5.9.1",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
     },
-    "build": {
-        "development": {
-            "developmentClient": true,
-            "distribution": "internal"
-        },
-        "preview": {
-            "distribution": "internal",
-            "android": {
-                "buildType": "apk",
-                "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=armeabi-v7a"
-            }
-        },
-        "production": {
-            "android": {
-                "gradleCommand": ":app:bundleRelease -PreactNativeArchitectures=armeabi-v7a"
-            }
-        }
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=armeabi-v7a"
+      }
     },
-    "submit": {
-        "production": {}
+    "production": {
+      "developmentClient": false,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=armeabi-v7a"
+      }
     }
+  },
+  "submit": {
+    "production": {}
+  }
 }
