@@ -13,7 +13,6 @@ const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 const char *base_topic = "voknetral/device"; // Base topic for all devices
 const char *prefs_namespace = "voknetral";
-const char *legacy_prefs_namespace = "anomali";
 
 // Relay Pins Definition
 #define RELAY_PIN_1 12
@@ -77,6 +76,24 @@ const unsigned long COMMAND_DEBOUNCE_MS = 500;
 const unsigned long RECONNECT_DEBOUNCE_MS = 1000; // Reduced from 5000ms for faster reconnection
 unsigned long last_connection_check = 0;
 const unsigned long CONNECTION_CHECK_INTERVAL_MS = 3000;
+unsigned long last_heartbeat_ms = 0;
+const unsigned long HEARTBEAT_INTERVAL_MS = 15000; // 15 seconds - more frequent heartbeat
+bool relay_state_cache[NUM_DEVICES] = {false};
+
+bool hasValidTime() {
+  return time(nullptr) > 1704067200; // 2024-01-01 00:00:00 UTC
+}
+
+String buildStatusPayload(unsigned long uptimeSeconds) {
+  String payload = "{\"status\":\"online\",\"uptime\":" + String(uptimeSeconds);
+  if (hasValidTime()) {
+    payload += ",\"ts\":" + String(time(nullptr));
+  } else {
+    payload += ",\"clockSynced\":false";
+  }
+  payload += "}";
+  return payload;
+}
 
 void setup_wifi() {
   Serial.println("\nConnecting to WiFi...");
@@ -109,25 +126,9 @@ void savePreferenceValue(const String &key, const String &value) {
 
 String loadPreferenceValue(const String &key, const char *defaultValue) {
   preferences.begin(prefs_namespace, true);
-  bool existsInCurrentNamespace = preferences.isKey(key.c_str());
   String value = preferences.getString(key.c_str(), defaultValue);
   preferences.end();
-
-  if (existsInCurrentNamespace) {
-    return value;
-  }
-
-  preferences.begin(legacy_prefs_namespace, true);
-  bool existsInLegacyNamespace = preferences.isKey(key.c_str());
-  String legacyValue = preferences.getString(key.c_str(), defaultValue);
-  preferences.end();
-
-  if (!existsInLegacyNamespace) {
-    return defaultValue;
-  }
-
-  savePreferenceValue(key, legacyValue);
-  return legacyValue;
+  return value;
 }
 
 void saveSchedules(int deviceIdx, String json) {
@@ -144,6 +145,40 @@ void saveMode(int deviceIdx, String mode) {
 
 String loadMode(int deviceIdx) {
   return loadPreferenceValue("mode_" + String(devices[deviceIdx].id), "manual");
+}
+
+void saveRelayState(int deviceIdx, bool isOn) {
+  preferences.begin(prefs_namespace, false);
+  preferences.putBool(("state_" + String(devices[deviceIdx].id)).c_str(), isOn);
+  preferences.end();
+}
+
+bool loadRelayState(int deviceIdx) {
+  preferences.begin(prefs_namespace, true);
+  bool isOn = preferences.getBool(
+      ("state_" + String(devices[deviceIdx].id)).c_str(), false);
+  preferences.end();
+  return isOn;
+}
+
+void applyRelayState(int deviceIdx, bool isOn, bool publishState,
+                     bool persistState, bool forceOutput = false) {
+  bool stateChanged = relay_state_cache[deviceIdx] != isOn;
+
+  if (forceOutput || stateChanged) {
+    digitalWrite(devices[deviceIdx].pin, isOn ? RELAY_ON : RELAY_OFF);
+  }
+
+  relay_state_cache[deviceIdx] = isOn;
+
+  if (persistState && stateChanged) {
+    saveRelayState(deviceIdx, isOn);
+  }
+
+  if (publishState && client.connected()) {
+    client.publish(devices[deviceIdx].topic_state.c_str(), isOn ? "ON" : "OFF",
+                   true);
+  }
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
@@ -179,9 +214,7 @@ void callback(char *topic, byte *payload, unsigned int length) {
       last_manual_command_ms[i] = now;
 
       bool newState = (message == "ON");
-      digitalWrite(devices[i].pin, newState ? RELAY_ON : RELAY_OFF);
-      client.publish(devices[i].topic_state.c_str(), newState ? "ON" : "OFF",
-                     true);
+      applyRelayState(i, newState, true, true);
       break;
     } else if (String(topic) == devices[i].topic_schedule) {
       saveSchedules(i, message);
@@ -222,9 +255,18 @@ boolean reconnect() {
   Serial.print("Connecting with clientId: ");
   Serial.println(clientId);
 
-  if (client.connect(clientId.c_str(), availabilityTopic.c_str(), 0, true, "offline")) {
+  // Set Last Will & Testament (MQTT Best Practice)
+  // QoS 1 untuk reliability, retain=true supaya aplikasi tahu status terakhir
+  if (client.connect(clientId.c_str(), availabilityTopic.c_str(), 1, true, "offline")) {
     Serial.println("MQTT Connected!");
+    
+    // Publish initial status dengan retain
     client.publish(availabilityTopic.c_str(), "online", true);
+    
+    // Publish extended status (untuk backup)
+    String statusPayload = buildStatusPayload(millis() / 1000);
+    String statusTopic = String(base_topic) + "/status";
+    client.publish(statusTopic.c_str(), (uint8_t*)statusPayload.c_str(), statusPayload.length(), true);
     
     // Subscribe to all topics
     for (int i = 0; i < NUM_DEVICES; i++) {
@@ -306,8 +348,7 @@ void checkSchedules() {
     // Only update if state changes to reduce wear and MQTT traffic
     bool currentState = (digitalRead(devices[i].pin) == RELAY_ON);
     if (currentState != shouldBeOn) {
-      digitalWrite(devices[i].pin, shouldBeOn ? RELAY_ON : RELAY_OFF);
-      client.publish(devices[i].topic_state.c_str(), shouldBeOn ? "ON" : "OFF", true);
+      applyRelayState(i, shouldBeOn, true, true);
       Serial.printf("Device %s switched %s by schedule\n", devices[i].id, shouldBeOn ? "ON" : "OFF");
     }
   }
@@ -336,7 +377,10 @@ void setup() {
     devices[i].topic_verify = deviceBase + "/verify";
 
     pinMode(devices[i].pin, OUTPUT);
-    digitalWrite(devices[i].pin, RELAY_OFF);
+    bool restoredState = loadRelayState(i);
+    applyRelayState(i, restoredState, false, false, true);
+    Serial.printf("Relay %s restored to %s\n", devices[i].id,
+                  restoredState ? "ON" : "OFF");
   }
 
   setup_wifi();
@@ -390,5 +434,19 @@ void loop() {
       Serial.print(WiFi.status() == WL_CONNECTED ? "OK" : "DISCONNECTED");
       Serial.println();
     }
+  }
+
+  // Send heartbeat to keep availability status fresh
+  if (client.connected() && (now - last_heartbeat_ms > HEARTBEAT_INTERVAL_MS)) {
+    last_heartbeat_ms = now;
+    
+    // Send heartbeat dengan timestamp (Better untuk tracking)
+    String heartbeatPayload = buildStatusPayload(now / 1000);
+    String heartbeatTopic = String(base_topic) + "/heartbeat";
+    
+    client.publish(availabilityTopic.c_str(), "online", true); // Keep availability marker
+    client.publish(heartbeatTopic.c_str(), (uint8_t*)heartbeatPayload.c_str(), heartbeatPayload.length(), true); // QoS 1 heartbeat dengan retention
+    
+    Serial.println("Heartbeat sent: " + heartbeatPayload);
   }
 }

@@ -26,6 +26,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const bottomBarHeight = Math.max(insets.bottom, 16) + 8;
+  const bottomScrollPadding = Platform.OS === "android" ? 8 : 24;
   const { TXT, language, setLanguage } = useLanguage();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [username, setUsername] = useState("");
@@ -129,10 +131,12 @@ export default function SettingsScreen() {
     router.back();
   };
 
+  const isSaveDisabled = !username.trim();
+
   const handleResetDefaults = () => {
     setStatusModal({
       visible: true,
-      title: "⚠️ Konfirmasi Reset",
+      title: "Konfirmasi Reset",
       message: `Kembalikan ke pengaturan awal?\n\nHost: ${APP_DEFAULTS.mqttHost}\nPort: ${APP_DEFAULTS.mqttPort}\nTopik: ${APP_DEFAULTS.mqttTopic}`,
       type: "confirm",
       onConfirm: performResetDefaults,
@@ -224,43 +228,55 @@ export default function SettingsScreen() {
       <View
         style={[
           styles.container,
-          { paddingTop: insets.top + 8, paddingBottom: insets.bottom },
+          { paddingTop: insets.top + 8 },
         ]}
       >
         <Stack.Screen options={{ headerShown: false }} />
 
         <View style={styles.customHeader}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.headerBackBtn}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={28}
-              color={SmartHomeColors.textPrimary}
-            />
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>{TXT.common.settings}</Text>
+          <View style={styles.headerSideSlot}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.headerBackBtn}
+            >
+              <Ionicons
+                name="chevron-back"
+                size={28}
+                color={SmartHomeColors.textPrimary}
+              />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={!username.trim()}
-            style={[styles.headerSaveBtn, !username.trim() && { opacity: 0.5 }]}
-          >
-            <Text style={styles.headerSaveText}>{TXT.common.save}</Text>
-          </TouchableOpacity>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {TXT.common.settings}
+            </Text>
+          </View>
+          <View style={[styles.headerSideSlot, styles.headerSideSlotRight]}>
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={isSaveDisabled}
+              style={[styles.headerSaveBtn, isSaveDisabled && { opacity: 0.5 }]}
+            >
+              <Text style={styles.headerSaveText}>{TXT.common.save}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={{ flex: 1 }}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.keyboardAvoiding}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 12}
         >
           <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={styles.scrollContent}
+            style={styles.scrollView}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: bottomScrollPadding },
+            ]}
             showsVerticalScrollIndicator={false}
+            scrollEnabled={true}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
             {/* Profile Section */}
             <View style={styles.section}>
@@ -531,11 +547,16 @@ export default function SettingsScreen() {
                 <Text style={styles.resetText}>{TXT.settings.resetApp}</Text>
               </TouchableOpacity>
               <View style={styles.versionContainer}>
-                <Text style={styles.hint}>Version 1.2.5 • Build 2024.03</Text>
+                <Text style={styles.hint}>Version 1.2.5 | Build 2024.03</Text>
               </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+
+        <View
+          pointerEvents="none"
+          style={[styles.bottomNavbarFill, { height: bottomBarHeight }]}
+        />
 
         <Modal
           animationType="fade"
@@ -734,43 +755,6 @@ export default function SettingsScreen() {
   );
 }
 
-function getLogTypeIcon(type: ApplicationLog["type"]) {
-  switch (type) {
-    case "success":
-      return "checkmark-circle";
-    case "warning":
-      return "warning";
-    case "error":
-      return "close-circle";
-    default:
-      return "information-circle";
-  }
-}
-
-function getLogTypeColor(type: ApplicationLog["type"]) {
-  switch (type) {
-    case "success":
-      return "#10B981";
-    case "warning":
-      return "#F59E0B";
-    case "error":
-      return "#EF4444";
-    default:
-      return SmartHomeColors.purple;
-  }
-}
-
-function formatLogTime(date: Date) {
-  return date.toLocaleString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -779,36 +763,57 @@ const styles = StyleSheet.create({
   customHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 14,
+    gap: 12,
     backgroundColor: SmartHomeColors.cardBg,
-    position: "relative",
+  },
+  headerSideSlot: {
+    width: 96,
+    justifyContent: "center",
+  },
+  headerSideSlotRight: {
+    alignItems: "flex-end",
   },
   headerBackBtn: {
-    padding: 4,
-    marginLeft: -4,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 10,
   },
   headerTitleContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
+    minHeight: 48,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 12,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: SmartHomeColors.textPrimary,
     letterSpacing: -0.5,
+    textAlign: "center",
+  },
+  keyboardAvoiding: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  bottomNavbarFill: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#FFFFFF",
   },
   scrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: 40,
     gap: 24,
   },
   section: {
@@ -824,13 +829,16 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "baseline",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
   },
   sectionHeaderCenter: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
+    flexWrap: "wrap",
   },
   resetLink: {
     fontSize: 13,
@@ -840,17 +848,22 @@ const styles = StyleSheet.create({
   resetLinkContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 40,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     backgroundColor: "#F3E8FF",
-    borderRadius: 8,
+    borderRadius: 12,
   },
   headerSaveBtn: {
     backgroundColor: "rgba(139, 92, 246, 0.08)",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    minWidth: 96,
+    height: 48,
+    paddingHorizontal: 18,
     borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 10,
   },
   headerSaveText: {
@@ -983,7 +996,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     backgroundColor: "#F3E8FF",
-    padding: 14,
+    minHeight: 56,
+    paddingHorizontal: 14,
     borderRadius: 14,
     marginTop: 8,
     borderWidth: 1,
